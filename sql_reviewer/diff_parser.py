@@ -96,6 +96,8 @@ def fetch_changed_files(
         filename = file_info["filename"]
         patch = file_info.get("patch")
 
+        if file_info.get("status") == "removed":
+            continue  # deleted files have no content to fetch
         if not patch:
             continue  # large files may omit patch; skip
         if not _matches_patterns(filename, file_patterns):

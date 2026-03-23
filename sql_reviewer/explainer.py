@@ -94,7 +94,9 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
             try:
                 with conn.cursor() as cur:
                     cur.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
-                    cur.execute(f"EXPLAIN ANALYZE {sql}")
+                    # psycopg2 has no way to parameterize EXPLAIN ANALYZE;
+                    # `sql` is already a substituted literal string, not user input.
+                    cur.execute(f"EXPLAIN ANALYZE {sql}")  # noqa: S608
                     plan_rows = cur.fetchall()
                     plan_text = "\n".join(row[0] for row in plan_rows)
                 conn.rollback()
