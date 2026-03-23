@@ -1304,6 +1304,24 @@ def test_batching_splits_by_query_count():
     assert len(batches) == 2  # 10 + 2
     assert len(batches[0]) == 10
     assert len(batches[1]) == 2
+
+
+def test_analyze_multiple_files_correct_filenames():
+    """Findings must carry the correct filename even when multiple files are analyzed."""
+    result_a = make_result("SELECT 1", SAMPLE_PLAN, line=1, filename="src/a.py")
+    result_b = make_result("SELECT 2", SAMPLE_PLAN, line=2, filename="src/b.py")
+
+    mock_client = MagicMock()
+    # Return a finding for each call; Claude is called once per file
+    mock_client.messages.create.side_effect = [
+        MagicMock(content=[MagicMock(text='[{"line_number": 1, "severity": "info", "summary": "ok a", "suggestion": null, "has_suggestion": false}]')]),
+        MagicMock(content=[MagicMock(text='[{"line_number": 2, "severity": "info", "summary": "ok b", "suggestion": null, "has_suggestion": false}]')]),
+    ]
+
+    findings = analyze_results([result_a, result_b], mock_client)
+    assert len(findings) == 2
+    filenames = {f.filename for f in findings}
+    assert filenames == {"src/a.py", "src/b.py"}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1441,10 +1459,18 @@ def analyze_results(
     results: list[ExplainResult],
     anthropic_client,
 ) -> list[Finding]:
-    batches = _build_batches(results)
+    # Group by filename first, then split each file's results into batches.
+    # This ensures _analyze_batch always receives results from a single file,
+    # so Finding.filename is always correct.
+    from collections import defaultdict
+    by_file: dict[str, list[ExplainResult]] = defaultdict(list)
+    for result in results:
+        by_file[result.query.filename].append(result)
+
     findings = []
-    for batch in batches:
-        findings.extend(_analyze_batch(batch, anthropic_client))
+    for file_results in by_file.values():
+        for batch in _build_batches(file_results):
+            findings.extend(_analyze_batch(batch, anthropic_client))
     return findings
 ```
 
@@ -1454,7 +1480,7 @@ def analyze_results(
 pytest tests/test_analyzer.py -v
 ```
 
-Expected: all 8 tests PASS.
+Expected: all 9 tests PASS.
 
 - [ ] **Step 5: Update `sql_reviewer/__init__.py`**
 
