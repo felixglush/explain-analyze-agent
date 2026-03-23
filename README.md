@@ -14,7 +14,7 @@ Automatically runs `EXPLAIN ANALYZE` on SQL queries in pull request diffs and po
 
 **1. Add the workflow to your repo**
 
-Copy `workflow-template.yml` to `.github/workflows/sql-review.yml` in your repo. Update the `pip install` URL to point to this repo.
+Copy `workflow-template.yml` to `.github/workflows/sql-review.yml` in your repo. That's the only workflow file you'll ever need — all Postgres setup, Python installation, and environment wiring is handled by the reusable workflow in this repo. You never need to edit it again.
 
 **2. Add `.sql-reviewer.yml` to your repo root**
 

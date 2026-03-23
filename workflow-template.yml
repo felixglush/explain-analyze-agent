@@ -1,59 +1,27 @@
-# workflow-template.yml
 # Copy this file to .github/workflows/sql-review.yml in your repo.
-# Required secrets: ANTHROPIC_API_KEY (add in repo Settings → Secrets and variables → Actions)
-# GITHUB_TOKEN is provided automatically by GitHub Actions.
+# That's the only setup required — all complexity lives in the tool repo.
+#
+# Required secret: ANTHROPIC_API_KEY
+#   Add it at: Settings → Secrets and variables → Actions → New repository secret
+#   GITHUB_TOKEN is provided automatically by GitHub Actions.
 
 name: SQL Review
 
 on:
   pull_request:
-    types: [opened]        # runs once when PR is first opened
+    types: [opened]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to review (for manual re-runs)"
+        description: "PR number to review"
         required: true
         type: string
 
-permissions:
-  pull-requests: write     # post and delete inline review comments
-  contents: read           # fetch file content from the PR branch
-
 jobs:
   sql-review:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: sql_review
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install sql_reviewer
-        run: pip install https://github.com/YOUR_ORG/explain-analyze-agent/archive/main.tar.gz
-
-      - name: Run SQL review
-        run: python -m sql_reviewer
-        env:
-          DATABASE_URL: postgresql://postgres:test@localhost:5432/sql_review
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
-          REPO: ${{ github.repository }}
+    uses: felixglush/explain-analyze-agent/.github/workflows/sql-review.yml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+      repo: ${{ github.repository }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
