@@ -1,0 +1,6 @@
+# tests/fixtures/.sql-reviewer.yml
+# Copy to your project root and edit for local end-to-end testing.
+schema_file: tests/fixtures/sample_schema.sql
+file_patterns:
+  - "src/**/*.py"
+  - "app/**/*.py"
