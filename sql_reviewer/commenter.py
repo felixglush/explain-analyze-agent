@@ -41,21 +41,60 @@ def _build_comment_body(finding: Finding) -> str:
     return "\n".join(lines)
 
 
-def _delete_previous_comments(repo: str, pr_number: int, token: str) -> None:
-    headers = _headers(token)
+def _fetch_existing_bot_review_comments(
+    repo: str, pr_number: int, token: str
+) -> dict[tuple[str, int], dict]:
+    """Return bot review comments keyed by (path, position)."""
     resp = httpx.get(
         f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/comments",
-        headers=headers,
+        headers=_headers(token),
     )
     resp.raise_for_status()
-    for comment in resp.json():
-        if MARKER in comment.get("body", ""):
-            del_resp = httpx.delete(
-                f"{GITHUB_API}/repos/{repo}/pulls/comments/{comment['id']}",
-                headers=headers,
-            )
-            if del_resp.status_code not in (204, 404):
-                logger.warning("Failed to delete comment %d: %s", comment["id"], del_resp.status_code)
+    result: dict[tuple[str, int], dict] = {}
+    for c in resp.json():
+        if MARKER in c.get("body", "") and c.get("position") is not None:
+            result[(c["path"], c["position"])] = c
+    return result
+
+
+def _fetch_existing_bot_issue_comments(
+    repo: str, pr_number: int, token: str
+) -> list[dict]:
+    """Return bot issue-level comments (e.g. 'no issues found')."""
+    resp = httpx.get(
+        f"{GITHUB_API}/repos/{repo}/issues/{pr_number}/comments",
+        headers=_headers(token),
+    )
+    resp.raise_for_status()
+    return [c for c in resp.json() if MARKER in c.get("body", "")]
+
+
+def _delete_review_comment(comment_id: int, repo: str, token: str) -> None:
+    resp = httpx.delete(
+        f"{GITHUB_API}/repos/{repo}/pulls/comments/{comment_id}",
+        headers=_headers(token),
+    )
+    if resp.status_code not in (204, 404):
+        logger.warning("Failed to delete review comment %d: %s", comment_id, resp.status_code)
+
+
+def _delete_issue_comment(comment_id: int, repo: str, token: str) -> None:
+    resp = httpx.delete(
+        f"{GITHUB_API}/repos/{repo}/issues/comments/{comment_id}",
+        headers=_headers(token),
+    )
+    if resp.status_code not in (204, 404):
+        logger.warning("Failed to delete issue comment %d: %s", comment_id, resp.status_code)
+
+
+def _patch_review_comment(comment_id: int, body: str, repo: str, token: str) -> None:
+    """Update an existing review comment body in-place (preserves thread)."""
+    resp = httpx.patch(
+        f"{GITHUB_API}/repos/{repo}/pulls/comments/{comment_id}",
+        headers=_headers(token),
+        json={"body": body},
+    )
+    resp.raise_for_status()
 
 
 def post_findings(
@@ -66,38 +105,63 @@ def post_findings(
     total_queries: int,
 ) -> None:
     headers = _headers(token)
-    _delete_previous_comments(repo, pr_number, token)
-
     postable = [f for f in findings if f.diff_position is not None]
 
+    existing_review = _fetch_existing_bot_review_comments(repo, pr_number, token)
+    existing_issue = _fetch_existing_bot_issue_comments(repo, pr_number, token)
+
     if not postable:
-        # No findings (or all skipped) — post plain issue comment
+        # No findings — post plain issue comment (deduplicated)
         body = f"{MARKER} SQL Review: no issues found in {total_queries} quer{'y' if total_queries == 1 else 'ies'} analyzed"
-        resp = httpx.post(
-            f"{GITHUB_API}/repos/{repo}/issues/{pr_number}/comments",
-            headers=headers,
-            json={"body": body},
-        )
-        resp.raise_for_status()
+        if not any(c["body"] == body for c in existing_issue):
+            for c in existing_issue:
+                _delete_issue_comment(c["id"], repo, token)
+            for c in existing_review.values():
+                _delete_review_comment(c["id"], repo, token)
+            resp = httpx.post(
+                f"{GITHUB_API}/repos/{repo}/issues/{pr_number}/comments",
+                headers=headers,
+                json={"body": body},
+            )
+            resp.raise_for_status()
+        return
+
+    # Clean up any stale "no issues found" issue comments
+    for c in existing_issue:
+        _delete_issue_comment(c["id"], repo, token)
+
+    desired: dict[tuple[str, int], Finding] = {
+        (f.filename, f.diff_position): f  # type: ignore[index]
+        for f in postable
+    }
+
+    # Delete comments for findings that no longer exist
+    for key in set(existing_review) - set(desired):
+        _delete_review_comment(existing_review[key]["id"], repo, token)
+
+    # Update changed comments in-place; collect genuinely new ones
+    to_post: list[Finding] = []
+    for key, f in desired.items():
+        body = _build_comment_body(f)
+        if key in existing_review:
+            if existing_review[key]["body"] != body:
+                _patch_review_comment(existing_review[key]["id"], body, repo, token)
+            # else: identical — leave untouched
+        else:
+            to_post.append(f)
+
+    if not to_post:
+        logger.info("No new findings to post on PR #%d", pr_number)
         return
 
     comments = [
-        {
-            "path": f.filename,
-            "position": f.diff_position,
-            "body": _build_comment_body(f),
-        }
-        for f in postable
+        {"path": f.filename, "position": f.diff_position, "body": _build_comment_body(f)}
+        for f in to_post
     ]
-
     resp = httpx.post(
         f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/reviews",
         headers=headers,
-        json={
-            "body": MARKER,
-            "event": "COMMENT",
-            "comments": comments,
-        },
+        json={"body": MARKER, "event": "COMMENT", "comments": comments},
     )
     resp.raise_for_status()
-    logger.info("Posted %d finding(s) on PR #%d", len(postable), pr_number)
+    logger.info("Posted %d new finding(s) on PR #%d", len(to_post), pr_number)
