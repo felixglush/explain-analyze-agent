@@ -47,7 +47,7 @@ file_patterns:
   - "app/**/*.py"
 ```
 
-- `setup_command`: shell command to apply schema to the Postgres container. Executed by `main.py` as a subprocess before the pipeline runs. The `DATABASE_URL` environment variable is available to this command.
+- `setup_command`: shell command to apply schema to the Postgres container. Executed by `main.py` as a subprocess before the pipeline runs. The subprocess inherits the full runner environment (`subprocess.run` default), so `PATH` and all other secrets are available alongside `DATABASE_URL`.
 - `file_patterns`: glob patterns for files to scan.
 
 ### `diff_parser.py`
@@ -103,7 +103,7 @@ class ExtractedQuery:
     sql: str
     filename: str
     line_number: int
-    diff_position: int
+    diff_position: int | None  # None if no nearby changed line found (ORM path)
     source: Literal["raw", "orm"]
 ```
 
@@ -124,6 +124,15 @@ Heuristics for dummy values based on column/parameter name:
 - Contains `is_`, `has_`, `active`, `enabled` → `true`
 - Default → `'placeholder'`
 
+**Output:** Returns a list of `ExplainResult` objects:
+```python
+@dataclass
+class ExplainResult:
+    query: ExtractedQuery   # the original extracted query
+    plan_text: str          # full EXPLAIN ANALYZE output as plain text
+```
+Queries that fail execution are logged and excluded from the returned list.
+
 **EXPLAIN ANALYZE execution:**
 - Connects via `psycopg2` using `DATABASE_URL`
 - Wraps each query: `BEGIN; EXPLAIN ANALYZE <query>; ROLLBACK;` to prevent writes from persisting
@@ -137,9 +146,11 @@ Heuristics for dummy values based on column/parameter name:
 
 For each query with a successful execution plan, Claude receives:
 - The original SQL query
-- A few lines of surrounding source code context
+- 5 lines before and after the query's `line_number` from `full_content` (capped at file boundaries)
 - The full `EXPLAIN ANALYZE` output
 - An instruction to focus on structural issues, not cost estimates (see known limitation above)
+
+Note: the ~8,000 token batch budget covers plan output only. Context lines add roughly 500–1,000 tokens per query and are not counted against the batch limit. Batches may therefore exceed 8,000 tokens in practice; this is acceptable given Claude's context window.
 
 **Batching:** Queries from the same file are grouped into a single Claude API call, up to a maximum of 10 queries or ~8,000 tokens of plan output per batch (whichever is reached first). Token count is estimated at 4 characters per token (no tokenizer dependency required). Queries exceeding this per-file limit are split into additional batches.
 
@@ -158,7 +169,20 @@ For each query with a successful execution plan, Claude receives:
 
 Response is parsed as JSON. On malformed response or API error: log the error, skip the batch, continue.
 
-Returns a list of `Finding` objects matching the above schema. `analyzer.py` resolves each `Finding.line_number` back to a `diff_position` before returning, by matching against the `ExtractedQuery` objects in the batch (keyed on `line_number`). The resolved `diff_position` is added to each `Finding` object. If `line_number` from Claude does not match any query in the batch, `diff_position` is set to `None` and the finding is skipped in `commenter.py`.
+Returns a list of `Finding` objects. `analyzer.py` resolves each `Finding.line_number` back to a `diff_position` before returning, by matching against the `ExtractedQuery` objects in the batch (keyed on `line_number`). If `line_number` from Claude does not match any query in the batch, `diff_position` is set to `None` and the finding is skipped in `commenter.py`.
+
+```python
+@dataclass
+class Finding:
+    filename: str
+    line_number: int          # from Claude's JSON response
+    diff_position: int | None # resolved from ExtractedQuery; None = skip
+    severity: Literal["info", "warning", "critical"]
+    summary: str
+    suggestion: str | None    # None when has_suggestion is false
+    has_suggestion: bool
+    plan_text: str            # raw EXPLAIN ANALYZE output (for comment details block)
+```
 
 ### `commenter.py`
 
@@ -185,7 +209,8 @@ Returns a list of `Finding` objects matching the above schema. `analyzer.py` res
   ```
   </details>
   ```
-- If no issues found: posts a single summary comment — `<!-- sql-reviewer --> SQL Review: no issues found in N queries analyzed`
+- If issues found: submits a single review via `POST /repos/{owner}/{repo}/pulls/{pr_number}/reviews` with type `COMMENT` and all inline comments in one request
+- If no issues found: posts a plain PR comment via `POST /repos/{owner}/{repo}/issues/{pr_number}/comments` with body `<!-- sql-reviewer --> SQL Review: no issues found in N queries analyzed`. Uses the issues comments endpoint (not the reviews API) because the reviews API requires at least one inline comment.
 - Review type: `COMMENT` (not `APPROVE` or `REQUEST_CHANGES`) — suggestions only, never blocking
 
 ---
@@ -286,6 +311,7 @@ jobs:
 | `.sql-reviewer.yml` missing or invalid | Exit 1 with clear error message |
 | `setup_command` exits non-zero | Exit 1 — schema setup failed, cannot continue |
 | GitHub API call fails (diff fetch, comment post) | Exit 1 with error details |
+| PR not found or inaccessible (bad `pr_number`, wrong repo) | Exit 1 with error details |
 | No Python files changed matching `file_patterns` | Exit 0 silently (nothing to review) |
 | Claude API call fails or returns malformed JSON | Log warning, skip affected queries/batch, continue |
 | Individual query fails EXPLAIN ANALYZE | Log warning, skip that query, continue |
