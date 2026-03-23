@@ -24,6 +24,8 @@
 | `sql_reviewer/explainer.py` | Param substitution + EXPLAIN ANALYZE via psycopg2 |
 | `sql_reviewer/analyzer.py` | Send query+plan to Claude, return structured findings |
 | `sql_reviewer/commenter.py` | Delete old comments, post inline review via GitHub API |
+| `tests/fixtures/sample_schema.sql` | Sample Postgres schema for local e2e testing |
+| `tests/fixtures/.sql-reviewer.yml` | Sample config pointing at the sample schema |
 | `workflow-template.yml` | Copy-paste workflow for consuming repos |
 | `tests/conftest.py` | Shared pytest fixtures |
 | `tests/test_config.py` | Config loading/validation unit tests |
@@ -1990,13 +1992,73 @@ git commit -m "feat: add main orchestrator with env var validation and pipeline 
 
 ---
 
-## Task 9: `workflow-template.yml` and `README.md`
+## Task 9: `workflow-template.yml`, `README.md`, and sample fixtures
 
 **Files:**
+- Create: `tests/fixtures/sample_schema.sql`
+- Create: `tests/fixtures/.sql-reviewer.yml`
 - Create: `workflow-template.yml`
 - Create: `README.md`
 
-- [ ] **Step 1: Create `workflow-template.yml`**
+- [ ] **Step 1: Create `tests/fixtures/sample_schema.sql`**
+
+A realistic schema used for local end-to-end testing. The integration tests in `test_explainer.py` create their own tables via pytest fixtures and don't need this file — it exists solely to support running `python -m sql_reviewer` locally against a real PR.
+
+```sql
+-- tests/fixtures/sample_schema.sql
+-- Sample schema for local end-to-end testing of sql_reviewer.
+-- Load with: psql $DATABASE_URL -f tests/fixtures/sample_schema.sql
+
+CREATE TABLE IF NOT EXISTS users (
+    id          SERIAL PRIMARY KEY,
+    email       TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    is_active   BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email    ON users (email);
+CREATE INDEX IF NOT EXISTS idx_users_active   ON users (is_active) WHERE is_active = true;
+
+CREATE TABLE IF NOT EXISTS orders (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    total_cents INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders (user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders (status);
+
+CREATE TABLE IF NOT EXISTS order_items (
+    id         SERIAL PRIMARY KEY,
+    order_id   INTEGER NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL,
+    quantity   INTEGER NOT NULL DEFAULT 1,
+    unit_cents INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items (order_id);
+```
+
+- [ ] **Step 2: Create `tests/fixtures/.sql-reviewer.yml`**
+
+```yaml
+# tests/fixtures/.sql-reviewer.yml
+# Copy to your project root and edit for local end-to-end testing.
+schema_file: tests/fixtures/sample_schema.sql
+file_patterns:
+  - "src/**/*.py"
+  - "app/**/*.py"
+```
+
+- [ ] **Step 3: Update `README.md` local testing section to reference the fixtures** (add after the "Running tests" section)
+
+Add this to the README content below (see Step 5 for the full README).
+
+- [ ] **Step 4: Create `workflow-template.yml`**
 
 ```yaml
 # workflow-template.yml
@@ -2060,7 +2122,7 @@ jobs:
           REPO: ${{ github.repository }}
 ```
 
-- [ ] **Step 2: Create `README.md`**
+- [ ] **Step 5: Create `README.md`**
 
 ```markdown
 # SQL Review Action
@@ -2111,6 +2173,31 @@ pytest tests/ -v -k "not test_explain"
 DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review pytest tests/ -v
 ```
 
+## Local end-to-end testing
+
+To run the tool locally against a real PR:
+
+```bash
+# 1. Start Postgres and load the sample schema
+docker run -d --name sql-review-local \
+  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=sql_review \
+  -p 5432:5432 postgres:16
+psql postgresql://postgres:test@localhost:5432/sql_review -f tests/fixtures/sample_schema.sql
+
+# 2. Copy the sample config to your project root and edit file_patterns
+cp tests/fixtures/.sql-reviewer.yml .sql-reviewer.yml
+
+# 3. Set env vars (or use a .env file with `export $(cat .env | xargs)`)
+export ANTHROPIC_API_KEY=sk-ant-...
+export GITHUB_TOKEN=github_pat_...   # needs pull-requests:write + contents:read
+export REPO=owner/your-repo
+export PR_NUMBER=123
+export DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review
+
+# 4. Run
+python -m sql_reviewer
+```
+
 ## Configuration reference
 
 | Key | Required | Description |
@@ -2120,7 +2207,7 @@ DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review pytest tests/ 
 | `file_patterns` | Yes | Glob patterns for Python files to scan |
 ```
 
-- [ ] **Step 3: Run the full test suite one final time**
+- [ ] **Step 6: Run the full test suite one final time**
 
 ```bash
 DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review pytest tests/ -v
@@ -2128,9 +2215,9 @@ DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review pytest tests/ 
 
 Expected: all tests PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add workflow-template.yml README.md
-git commit -m "feat: add workflow template and README"
+git add tests/fixtures/ workflow-template.yml README.md
+git commit -m "feat: add workflow template, README, and sample fixtures for local testing"
 ```
