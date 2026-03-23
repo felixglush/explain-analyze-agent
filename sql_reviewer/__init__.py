@@ -1,1 +1,3 @@
-# Public dataclasses re-exported here as modules are implemented.
+from sql_reviewer.config import Config, ConfigError
+
+__all__ = ["Config", "ConfigError"]
