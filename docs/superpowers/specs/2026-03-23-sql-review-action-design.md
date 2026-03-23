@@ -41,13 +41,19 @@ GitHub Actions workflow
 Loads `.sql-reviewer.yml` from the consuming repo root.
 
 ```yaml
-setup_command: "psql $DATABASE_URL -f db/setup.sql"
+# Option A — simple (recommended): point to a SQL schema file
+schema_file: db/model_ddl.sql
+
+# Option B — override for complex setups (e.g. migration-only projects):
+# setup_command: "python manage.py migrate"
+
 file_patterns:
   - "src/**/*.py"
   - "app/**/*.py"
 ```
 
-- `setup_command`: shell command to apply schema to the Postgres container. Executed by `main.py` as a subprocess before the pipeline runs. The subprocess inherits the full runner environment (`subprocess.run` default), so `PATH` and all other secrets are available alongside `DATABASE_URL`.
+- `schema_file`: path to a SQL file containing the full current schema (CREATE TABLE, CREATE INDEX, etc.). `main.py` runs `psql $DATABASE_URL -f <schema_file>` before the pipeline. This is the recommended option — most projects maintain a `model_ddl.sql` or `schema.sql` that reflects the current state.
+- `setup_command`: alternative to `schema_file` for projects without a single schema file (e.g. migration-only setups). Executed as a subprocess inheriting the full runner environment, so `PATH` and all secrets are available alongside `DATABASE_URL`. Exactly one of `schema_file` or `setup_command` must be set; `main.py` exits 1 if neither or both are present.
 - `file_patterns`: glob patterns for files to scan.
 
 ### `diff_parser.py`
@@ -222,7 +228,7 @@ class Finding:
 ```yaml
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -231,7 +237,7 @@ on:
         type: string
 ```
 
-Runs automatically on new PRs and when commits are pushed to an existing PR. `workflow_dispatch` allows manual re-runs against an existing PR by specifying its number.
+Runs automatically when a PR is first opened. Does not re-run on subsequent commits. `workflow_dispatch` allows manual re-runs against an existing PR by specifying its number.
 
 ### Permissions
 
@@ -309,7 +315,9 @@ jobs:
 | Failure | Behavior |
 |---|---|
 | `.sql-reviewer.yml` missing or invalid | Exit 1 with clear error message |
-| `setup_command` exits non-zero | Exit 1 — schema setup failed, cannot continue |
+| Neither `schema_file` nor `setup_command` set (or both set) | Exit 1 with clear error message |
+| `schema_file` path does not exist | Exit 1 with clear error message |
+| `schema_file` / `setup_command` exits non-zero | Exit 1 — schema setup failed, cannot continue |
 | GitHub API call fails (diff fetch, comment post) | Exit 1 with error details |
 | PR not found or inaccessible (bad `pr_number`, wrong repo) | Exit 1 with error details |
 | No Python files changed matching `file_patterns` | Exit 0 silently (nothing to review) |
