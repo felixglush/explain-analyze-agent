@@ -43,7 +43,7 @@ def substitute_params(sql: str) -> str:
     sql = re.sub(r"%\(([^)]+)\)s", lambda m: _dummy_value(m.group(1)), sql)
 
     # psycopg2 positional: %s
-    sql = re.sub(r"(?<!['\w])%s(?!['\w])", "1", sql)
+    sql = re.sub(r"(?<!['\w])%s(?!['\w])", "'placeholder'", sql)
 
     return sql
 
