@@ -1,11 +1,11 @@
 import base64
-import respx
+
 import httpx
+import respx
+
 from sql_reviewer.diff_parser import (
     fetch_changed_files,
     parse_patch_positions,
-    ChangedLine,
-    ChangedFile,
 )
 
 REPO = "owner/repo"
@@ -28,7 +28,9 @@ def test_parse_patch_positions_multiple_hunks():
         "@@ -10,2 +11,3 @@\n unchanged\n+second add\n unchanged"
     )
     result = parse_patch_positions(patch)
-    assert result[2] == 3   # "first add" at file line 2, position 3 (@@ header is pos 1, first context is pos 2)
+    assert (
+        result[2] == 3
+    )  # "first add" at file line 2, position 3 (@@ header is pos 1, first context is pos 2)
     assert result[12] == 7  # "second add" at file line 12, position 7
 
 
@@ -68,10 +70,20 @@ def test_fetch_changed_files_returns_changed_lines(paginated):
 @respx.mock
 def test_fetch_changed_files_filters_by_pattern(paginated):
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=paginated([
-            {"filename": "README.md", "status": "modified", "patch": "@@ -1 +1 @@\n+text"},
-            {"filename": "src/app.py", "status": "modified", "patch": "@@ -1 +1,2 @@\n unchanged\n+new"},
-        ])
+        side_effect=paginated(
+            [
+                {
+                    "filename": "README.md",
+                    "status": "modified",
+                    "patch": "@@ -1 +1 @@\n+text",
+                },
+                {
+                    "filename": "src/app.py",
+                    "status": "modified",
+                    "patch": "@@ -1 +1,2 @@\n unchanged\n+new",
+                },
+            ]
+        )
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "main"}})

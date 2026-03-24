@@ -2,12 +2,14 @@
 Integration tests — require a real Postgres instance.
 Set DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review before running.
 """
+
 import os
-import pytest
+
 import psycopg2
-from sql_reviewer.diff_parser import ChangedLine
+import pytest
+
+from sql_reviewer.explainer import ExplainResult, explain_queries, substitute_params
 from sql_reviewer.sql_extractor import ExtractedQuery
-from sql_reviewer.explainer import explain_queries, substitute_params, ExplainResult
 
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:test@localhost:5432/sql_review")
 
@@ -50,6 +52,7 @@ def make_query(sql: str, line: int = 1) -> ExtractedQuery:
 
 
 # --- Unit tests for parameter substitution (no DB needed) ---
+
 
 def test_substitute_positional_params():
     # Positional params ($N) all become "1" — no context-based type inference.
@@ -132,6 +135,7 @@ def test_substitute_mixed_styles():
 
 
 # --- Integration tests (require Postgres) ---
+
 
 def test_explain_simple_select(db_conn, create_test_table):
     query = make_query("SELECT * FROM test_users WHERE active = true")

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import re
 from dataclasses import dataclass
@@ -73,12 +74,17 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
                         statements = sqlglot.parse(sql)
                         if statements and isinstance(
                             statements[0],
-                            (sqlglot.expressions.Create, sqlglot.expressions.Drop,
-                             sqlglot.expressions.AlterTable, sqlglot.expressions.TruncateTable),
+                            (
+                                sqlglot.expressions.Create,
+                                sqlglot.expressions.Drop,
+                                sqlglot.expressions.AlterTable,
+                                sqlglot.expressions.TruncateTable,
+                            ),
                         ):
                             logger.warning(
                                 "Skipping DDL statement for EXPLAIN ANALYZE in %s line %d",
-                                query.filename, query.line_number,
+                                query.filename,
+                                query.line_number,
                             )
                             continue
                     except sqlglot.errors.ParseError:
@@ -93,7 +99,9 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
             except Exception as e:
                 logger.warning(
                     "EXPLAIN ANALYZE failed for query in %s line %d: %s",
-                    query.filename, query.line_number, e,
+                    query.filename,
+                    query.line_number,
+                    e,
                 )
                 conn.rollback()
     finally:

@@ -1,20 +1,19 @@
 from __future__ import annotations
+
 import base64
 import fnmatch
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from urllib.parse import quote
 
 import httpx
-
 
 GITHUB_API = "https://api.github.com"
 
 
 @dataclass
 class ChangedLine:
-    line_number: int    # absolute line number in the file (1-based)
+    line_number: int  # absolute line number in the file (1-based)
     diff_position: int  # position within the diff patch (for GitHub review API)
     content: str
 
@@ -137,10 +136,12 @@ def fetch_changed_files(
             for line_num, pos in sorted(line_to_position.items())
         ]
 
-        results.append(ChangedFile(
-            filename=filename,
-            full_content=full_content,
-            changed_lines=changed_lines,
-        ))
+        results.append(
+            ChangedFile(
+                filename=filename,
+                full_content=full_content,
+                changed_lines=changed_lines,
+            )
+        )
 
     return results

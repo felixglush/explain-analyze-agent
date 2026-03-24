@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import ast
 import json
 import logging
@@ -21,7 +22,7 @@ class ExtractedQuery:
     line_number: int
     diff_position: int | None  # None if no nearby changed line (ORM path)
     source: Literal["raw", "orm"]
-    source_context: str = ""   # 5 lines before/after the query for Claude's prompt
+    source_context: str = ""  # 5 lines before/after the query for Claude's prompt
 
 
 def _is_valid_sql(text: str) -> bool:
@@ -76,15 +77,17 @@ def _extract_raw_queries(changed_file: ChangedFile) -> list[ExtractedQuery]:
         lines = changed_file.full_content.splitlines()
         start = max(0, line_num - 1 - 5)
         end = min(len(lines), line_num + 5)
-        context = "\n".join(f"{i+1}: {lines[i]}" for i in range(start, end))
-        queries.append(ExtractedQuery(
-            sql=sql,
-            filename=changed_file.filename,
-            line_number=line_num,
-            diff_position=line_to_position.get(line_num),
-            source="raw",
-            source_context=context,
-        ))
+        context = "\n".join(f"{i + 1}: {lines[i]}" for i in range(start, end))
+        queries.append(
+            ExtractedQuery(
+                sql=sql,
+                filename=changed_file.filename,
+                line_number=line_num,
+                diff_position=line_to_position.get(line_num),
+                source="raw",
+                source_context=context,
+            )
+        )
     return queries
 
 
@@ -116,9 +119,7 @@ def _extract_orm_queries(
     changed_line_numbers = {cl.line_number for cl in changed_file.changed_lines}
     lines = changed_file.full_content.splitlines()
     changed_code = "\n".join(
-        f"{i+1}: {lines[i]}"
-        for i in range(len(lines))
-        if (i + 1) in changed_line_numbers
+        f"{i + 1}: {lines[i]}" for i in range(len(lines)) if (i + 1) in changed_line_numbers
     )
 
     prompt = (
@@ -161,15 +162,17 @@ def _extract_orm_queries(
         diff_position = _find_nearest_diff_position(line_number, changed_file)
         start = max(0, line_number - 1 - 5)
         end = min(len(file_lines), line_number + 5)
-        context = "\n".join(f"{i+1}: {file_lines[i]}" for i in range(start, end))
-        queries.append(ExtractedQuery(
-            sql=sql,
-            filename=changed_file.filename,
-            line_number=line_number,
-            diff_position=diff_position,
-            source="orm",
-            source_context=context,
-        ))
+        context = "\n".join(f"{i + 1}: {file_lines[i]}" for i in range(start, end))
+        queries.append(
+            ExtractedQuery(
+                sql=sql,
+                filename=changed_file.filename,
+                line_number=line_number,
+                diff_position=diff_position,
+                source="orm",
+                source_context=context,
+            )
+        )
     return queries
 
 

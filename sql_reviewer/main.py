@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import os
 import subprocess
@@ -33,7 +34,12 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _run_schema_setup(config_path: Path, schema_file: str | None, setup_command: str | None, database_url: str) -> None:
+def _run_schema_setup(
+    config_path: Path,
+    schema_file: str | None,
+    setup_command: str | None,
+    database_url: str,
+) -> None:
     if schema_file:
         schema_path = config_path.parent / schema_file
         if not schema_path.exists():
@@ -108,7 +114,11 @@ def main() -> None:
     logger.info("%d/%d queries explained successfully", len(explain_results), len(queries))
 
     if not explain_results:
-        logger.error("All %d quer%s failed EXPLAIN ANALYZE — aborting", len(queries), "y" if len(queries) == 1 else "ies")
+        logger.error(
+            "All %d quer%s failed EXPLAIN ANALYZE — aborting",
+            len(queries),
+            "y" if len(queries) == 1 else "ies",
+        )
         sys.exit(1)
 
     # 6. Analyze with Claude

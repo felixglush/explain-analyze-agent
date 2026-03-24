@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import patch
-from sql_reviewer.main import main
+
+import pytest
+
 from sql_reviewer.diff_parser import ChangedFile, ChangedLine
-from sql_reviewer.sql_extractor import ExtractedQuery
 from sql_reviewer.explainer import ExplainResult
-from sql_reviewer.analyzer import Finding
+from sql_reviewer.main import main
+from sql_reviewer.sql_extractor import ExtractedQuery
 
 
 def test_main_exits_1_on_missing_config(tmp_path, monkeypatch):
@@ -69,12 +70,14 @@ def test_main_exits_0_on_happy_path(tmp_path, monkeypatch):
         plan_text="Seq Scan on users  (cost=0.00..1.00 rows=1 width=36)",
     )
 
-    with patch("sql_reviewer.main.fetch_changed_files", return_value=[changed_file]), \
-         patch("sql_reviewer.main.extract_queries", return_value=[extracted_query]), \
-         patch("sql_reviewer.main.explain_queries", return_value=[explain_result]), \
-         patch("sql_reviewer.main.analyze_results", return_value=[]), \
-         patch("sql_reviewer.main.post_findings", return_value=None), \
-         patch("sql_reviewer.main._run_schema_setup", return_value=None):
+    with (
+        patch("sql_reviewer.main.fetch_changed_files", return_value=[changed_file]),
+        patch("sql_reviewer.main.extract_queries", return_value=[extracted_query]),
+        patch("sql_reviewer.main.explain_queries", return_value=[explain_result]),
+        patch("sql_reviewer.main.analyze_results", return_value=[]),
+        patch("sql_reviewer.main.post_findings", return_value=None),
+        patch("sql_reviewer.main._run_schema_setup", return_value=None),
+    ):
         with pytest.raises(SystemExit) as exc:
             main()
     assert exc.value.code == 0

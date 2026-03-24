@@ -1,14 +1,25 @@
 from __future__ import annotations
-from unittest.mock import MagicMock, call
-from sql_reviewer.sql_extractor import ExtractedQuery
+
+from unittest.mock import MagicMock
+
+from sql_reviewer.analyzer import analyze_results
 from sql_reviewer.explainer import ExplainResult
-from sql_reviewer.analyzer import analyze_results, Finding
+from sql_reviewer.sql_extractor import ExtractedQuery
 
 
-def make_result(sql: str, plan: str, line: int = 1, diff_pos: int | None = None, filename: str = "src/app.py") -> ExplainResult:
+def make_result(
+    sql: str,
+    plan: str,
+    line: int = 1,
+    diff_pos: int | None = None,
+    filename: str = "src/app.py",
+) -> ExplainResult:
     query = ExtractedQuery(
-        sql=sql, filename=filename, line_number=line,
-        diff_position=diff_pos if diff_pos is not None else line, source="raw",
+        sql=sql,
+        filename=filename,
+        line_number=line,
+        diff_position=diff_pos if diff_pos is not None else line,
+        source="raw",
     )
     return ExplainResult(query=query, plan_text=plan)
 
@@ -25,11 +36,18 @@ def _tool_response(name: str, input: dict) -> MagicMock:
     return MagicMock(content=[block])
 
 
-def _finding_response(severity="warning", summary="Sequential scan", suggestion=None, has_suggestion=False) -> MagicMock:
-    return _tool_response("report_finding", {
-        "severity": severity, "summary": summary,
-        "suggestion": suggestion, "has_suggestion": has_suggestion,
-    })
+def _finding_response(
+    severity="warning", summary="Sequential scan", suggestion=None, has_suggestion=False
+) -> MagicMock:
+    return _tool_response(
+        "report_finding",
+        {
+            "severity": severity,
+            "summary": summary,
+            "suggestion": suggestion,
+            "has_suggestion": has_suggestion,
+        },
+    )
 
 
 def _no_issues_response() -> MagicMock:
@@ -83,7 +101,15 @@ def test_analyze_retries_on_invalid_severity_then_succeeds():
     result = make_result("SELECT 1", SAMPLE_PLAN)
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = [
-        _tool_response("report_finding", {"severity": "bad", "summary": "x", "suggestion": None, "has_suggestion": False}),
+        _tool_response(
+            "report_finding",
+            {
+                "severity": "bad",
+                "summary": "x",
+                "suggestion": None,
+                "has_suggestion": False,
+            },
+        ),
         _finding_response(severity="info", summary="fixed"),
     ]
     findings = analyze_results([result], mock_client)
@@ -98,14 +124,20 @@ def test_analyze_returns_none_after_max_retries():
     mock_client = MagicMock()
     # Both attempts return bad severity
     mock_client.messages.create.return_value = _tool_response(
-        "report_finding", {"severity": "INVALID", "summary": "x", "suggestion": None, "has_suggestion": False}
+        "report_finding",
+        {
+            "severity": "INVALID",
+            "summary": "x",
+            "suggestion": None,
+            "has_suggestion": False,
+        },
     )
     assert analyze_results([result], mock_client) == []
 
 
 def test_analyze_one_api_call_per_query():
     """Each query triggers exactly one Claude API call (plus retries if any)."""
-    results = [make_result(f"SELECT {i}", SAMPLE_PLAN, line=i+1) for i in range(5)]
+    results = [make_result(f"SELECT {i}", SAMPLE_PLAN, line=i + 1) for i in range(5)]
     mock_client = MagicMock()
     mock_client.messages.create.return_value = _no_issues_response()
     analyze_results(results, mock_client)
@@ -130,7 +162,15 @@ def test_analyze_empty_summary_retries():
     result = make_result("SELECT 1", SAMPLE_PLAN)
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = [
-        _tool_response("report_finding", {"severity": "warning", "summary": "", "suggestion": None, "has_suggestion": False}),
+        _tool_response(
+            "report_finding",
+            {
+                "severity": "warning",
+                "summary": "",
+                "suggestion": None,
+                "has_suggestion": False,
+            },
+        ),
         _finding_response(severity="warning", summary="Non-empty summary"),
     ]
     findings = analyze_results([result], mock_client)
@@ -144,8 +184,21 @@ def test_analyze_inconsistent_has_suggestion():
     result = make_result("SELECT 1", SAMPLE_PLAN)
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = [
-        _tool_response("report_finding", {"severity": "warning", "summary": "Issue found", "suggestion": None, "has_suggestion": True}),
-        _finding_response(severity="warning", summary="Issue found", suggestion="CREATE INDEX ...", has_suggestion=True),
+        _tool_response(
+            "report_finding",
+            {
+                "severity": "warning",
+                "summary": "Issue found",
+                "suggestion": None,
+                "has_suggestion": True,
+            },
+        ),
+        _finding_response(
+            severity="warning",
+            summary="Issue found",
+            suggestion="CREATE INDEX ...",
+            has_suggestion=True,
+        ),
     ]
     findings = analyze_results([result], mock_client)
     assert mock_client.messages.create.call_count == 2

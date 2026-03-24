@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 import logging
-from typing import Literal
 
 import httpx
 
@@ -35,15 +35,12 @@ def _build_comment_body(finding: Finding) -> str:
     if finding.has_suggestion and finding.suggestion:
         lines.append(f"\n```sql\n{finding.suggestion}\n```")
     lines.append(
-        f"\n<details>\n<summary>EXPLAIN ANALYZE output</summary>\n\n"
-        f"```\n{finding.plan_text}\n```\n</details>"
+        f"\n<details>\n<summary>EXPLAIN ANALYZE output</summary>\n\n```\n{finding.plan_text}\n```\n</details>"
     )
     return "\n".join(lines)
 
 
-def _fetch_existing_bot_review_comments(
-    repo: str, pr_number: int, token: str
-) -> dict[tuple[str, int], dict]:
+def _fetch_existing_bot_review_comments(repo: str, pr_number: int, token: str) -> dict[tuple[str, int], dict]:
     """Return bot review comments keyed by (path, position)."""
     url = f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/comments"
     headers = _headers(token)
@@ -64,9 +61,7 @@ def _fetch_existing_bot_review_comments(
     return result
 
 
-def _fetch_existing_bot_issue_comments(
-    repo: str, pr_number: int, token: str
-) -> list[dict]:
+def _fetch_existing_bot_issue_comments(repo: str, pr_number: int, token: str) -> list[dict]:
     """Return bot issue-level comments (e.g. 'no issues found')."""
     url = f"{GITHUB_API}/repos/{repo}/issues/{pr_number}/comments"
     headers = _headers(token)
@@ -134,7 +129,8 @@ def post_findings(
                 lines.append(f"- {emoji} **{f.severity}** `{f.filename}`: {f.summary}")
             body = "\n".join(lines)
         else:
-            body = f"{MARKER} SQL Review: no issues found in {total_queries} quer{'y' if total_queries == 1 else 'ies'} analyzed"
+            suffix = "y" if total_queries == 1 else "ies"
+            body = f"{MARKER} SQL Review: no issues found in {total_queries} quer{suffix} analyzed"
         # Always clean up stale review comments
         for c in existing_review.values():
             _delete_review_comment(c["id"], repo, token)
@@ -158,7 +154,11 @@ def post_findings(
     for f in postable:
         key = (f.filename, f.diff_position)
         if key in seen_keys:
-            logger.warning("Duplicate finding at %s:%s — keeping first", f.filename, f.diff_position)
+            logger.warning(
+                "Duplicate finding at %s:%s — keeping first",
+                f.filename,
+                f.diff_position,
+            )
         else:
             seen_keys.add(key)
             deduped.append(f)
@@ -189,7 +189,11 @@ def post_findings(
         return
 
     comments = [
-        {"path": f.filename, "position": f.diff_position, "body": _build_comment_body(f)}
+        {
+            "path": f.filename,
+            "position": f.diff_position,
+            "body": _build_comment_body(f),
+        }
         for f in to_post
     ]
     resp = httpx.post(

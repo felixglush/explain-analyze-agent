@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import json as _json
+
+import httpx
 import pytest
 import respx
-import httpx
+
 from sql_reviewer.analyzer import Finding
-from sql_reviewer.commenter import post_findings, _build_comment_body, MARKER
+from sql_reviewer.commenter import MARKER, _build_comment_body, post_findings
 
 REPO = "owner/repo"
 PR_NUMBER = 7
@@ -36,11 +39,14 @@ def test_build_comment_body_warning():
     assert "<details>" in body
 
 
-@pytest.mark.parametrize("severity,icon", [
-    ("warning", "⚠️"),
-    ("critical", "🔴"),
-    ("info", "ℹ️"),
-])
+@pytest.mark.parametrize(
+    "severity,icon",
+    [
+        ("warning", "⚠️"),
+        ("critical", "🔴"),
+        ("info", "ℹ️"),
+    ],
+)
 def test_build_comment_body_severity_icon(severity, icon):
     body = _build_comment_body(make_finding(severity=severity))
     assert icon in body
@@ -48,9 +54,14 @@ def test_build_comment_body_severity_icon(severity, icon):
 
 def test_build_comment_body_no_suggestion():
     f = Finding(
-        filename="src/app.py", line_number=1, diff_position=1,
-        severity="info", summary="Looks fine", suggestion=None,
-        has_suggestion=False, plan_text="Index Scan...",
+        filename="src/app.py",
+        line_number=1,
+        diff_position=1,
+        severity="info",
+        summary="Looks fine",
+        suggestion=None,
+        has_suggestion=False,
+        plan_text="Index Scan...",
     )
     body = _build_comment_body(f)
     assert "suggestion" not in body.lower() or "CREATE" not in body
@@ -78,14 +89,22 @@ def test_post_findings_deletes_old_comments(paginated):
     findings = [make_finding(diff_pos=4)]
 
     old_comments = [
-        {"id": 101, "path": "src/app.py", "position": 99, "body": f"{MARKER}\nold comment at pos 99"},
-        {"id": 102, "path": "src/other.py", "position": 5, "body": f"{MARKER}\nstale finding"},
+        {
+            "id": 101,
+            "path": "src/app.py",
+            "position": 99,
+            "body": f"{MARKER}\nold comment at pos 99",
+        },
+        {
+            "id": 102,
+            "path": "src/other.py",
+            "position": 5,
+            "body": f"{MARKER}\nstale finding",
+        },
         {"id": 103, "body": "unrelated comment"},
     ]
     # Pagination: data on page 1, empty on page 2
-    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
-        side_effect=paginated(old_comments)
-    )
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(side_effect=paginated(old_comments))
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -123,8 +142,8 @@ def test_post_no_findings_uses_issue_comment():
 @respx.mock
 def test_post_skips_finding_with_none_diff_position():
     findings = [
-        make_finding(diff_pos=None),   # skipped — no diff position
-        make_finding(diff_pos=3),      # included
+        make_finding(diff_pos=None),  # skipped — no diff position
+        make_finding(diff_pos=3),  # included
     ]
 
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
@@ -135,6 +154,7 @@ def test_post_skips_finding_with_none_diff_position():
     )
 
     posted_bodies = []
+
     def capture_review(request, route):
         posted_bodies.append(_json.loads(request.content))
         return httpx.Response(200, json={"id": 1})
@@ -210,6 +230,7 @@ def test_post_findings_patches_changed_comment(paginated):
     assert not post_route.called, "POST /reviews should not be called when PATCHing existing comment"
 
     import json as _json2
+
     patch_request = patch_route.calls[0].request
     patched_body = _json2.loads(patch_request.content)["body"]
     assert patched_body == _build_comment_body(finding)
