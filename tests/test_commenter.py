@@ -77,11 +77,16 @@ def test_post_findings_with_inline_comments():
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
-    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
+    review_route = respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
         return_value=httpx.Response(200, json={"id": 1})
     )
 
     post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=3)
+
+    assert review_route.called, "POST /reviews should be called for inline findings"
+    body = _json.loads(review_route.calls[0].request.content)
+    assert len(body["comments"]) == 1
+    assert body["comments"][0]["position"] == 4
 
 
 @respx.mock

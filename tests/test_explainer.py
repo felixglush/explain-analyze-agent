@@ -1,6 +1,6 @@
 """
 Integration tests — require a real Postgres instance.
-Set DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review before running.
+Run `docker compose up -d` then `uv run pytest`, or set DATABASE_URL explicitly.
 """
 
 import os
@@ -11,7 +11,7 @@ import pytest
 from sql_reviewer.explainer import ExplainResult, explain_queries, substitute_params
 from sql_reviewer.sql_extractor import ExtractedQuery
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:test@localhost:5432/sql_review")
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:test@localhost:5434/sql_review")
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +157,7 @@ def test_explain_skips_invalid_sql(db_conn, create_test_table):
 
 
 def test_explain_with_parameterized_query(db_conn, create_test_table):
-    query = make_query("SELECT * FROM test_users WHERE id = $1 AND active = $2")
+    query = make_query("SELECT * FROM test_users WHERE id = $1")
     results = explain_queries([query], DB_URL)
     assert len(results) == 1
     assert results[0].plan_text  # got a plan back

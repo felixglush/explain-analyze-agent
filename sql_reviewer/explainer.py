@@ -77,7 +77,7 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
                             (
                                 sqlglot.expressions.Create,
                                 sqlglot.expressions.Drop,
-                                sqlglot.expressions.AlterTable,
+                                sqlglot.expressions.Alter,
                                 sqlglot.expressions.TruncateTable,
                             ),
                         ):
