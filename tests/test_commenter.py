@@ -209,9 +209,13 @@ def test_post_all_unanchored_findings_uses_issue_comment():
     findings = [
         make_finding(diff_pos=None, severity="warning"),
         Finding(
-            filename="src/b.py", line_number=2, diff_position=None,
-            severity="critical", summary="Full table scan",
-            suggestion=None, has_suggestion=False,
+            filename="src/b.py",
+            line_number=2,
+            diff_position=None,
+            severity="critical",
+            summary="Full table scan",
+            suggestion=None,
+            has_suggestion=False,
             plan_text="Seq Scan on orders",
         ),
     ]
@@ -239,13 +243,13 @@ def test_post_all_unanchored_findings_uses_issue_comment():
 def test_post_no_findings_deletes_stale_review_comments(paginated):
     """Stale bot review comments are deleted even when there are no new findings."""
     stale_review = {
-        "id": 300, "path": "src/app.py", "position": 5,
+        "id": 300,
+        "path": "src/app.py",
+        "position": 5,
         "body": f"{MARKER}\nold finding",
     }
 
-    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
-        side_effect=paginated([stale_review])
-    )
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(side_effect=paginated([stale_review]))
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -296,9 +300,7 @@ def test_post_findings_deletes_stale_issue_comment(paginated):
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
-    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
-        side_effect=paginated([stale_issue])
-    )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(side_effect=paginated([stale_issue]))
     delete_route = respx.delete(f"{BASE}/repos/{REPO}/issues/comments/500").mock(
         return_value=httpx.Response(204)
     )

@@ -98,14 +98,24 @@ def test_main_exits_1_when_all_explains_fail(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/test")
 
     extracted_query = ExtractedQuery(
-        sql="SELECT 1", filename="src/app.py", line_number=1, diff_position=1, source="raw",
+        sql="SELECT 1",
+        filename="src/app.py",
+        line_number=1,
+        diff_position=1,
+        source="raw",
     )
 
     with (
-        patch("sql_reviewer.main.fetch_changed_files", return_value=[
-            ChangedFile(filename="src/app.py", full_content="SELECT 1\n",
-                        changed_lines=[ChangedLine(line_number=1, diff_position=1, content="SELECT 1")])
-        ]),
+        patch(
+            "sql_reviewer.main.fetch_changed_files",
+            return_value=[
+                ChangedFile(
+                    filename="src/app.py",
+                    full_content="SELECT 1\n",
+                    changed_lines=[ChangedLine(line_number=1, diff_position=1, content="SELECT 1")],
+                )
+            ],
+        ),
         patch("sql_reviewer.main.extract_queries", return_value=[extracted_query]),
         patch("sql_reviewer.main.explain_queries", return_value=[]),
         patch("sql_reviewer.main._run_schema_setup", return_value=None),
@@ -113,5 +123,3 @@ def test_main_exits_1_when_all_explains_fail(tmp_path, monkeypatch):
         with pytest.raises(SystemExit) as exc:
             main()
     assert exc.value.code == 1
-
-
