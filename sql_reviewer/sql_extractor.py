@@ -11,7 +11,7 @@ from sql_reviewer.diff_parser import ChangedFile
 
 logger = logging.getLogger(__name__)
 
-SQL_KEYWORDS = {"select", "insert", "update", "delete", "with"}
+SQL_KEYWORDS = {"select", "insert", "update", "delete", "with", "merge"}
 
 
 @dataclass
@@ -45,13 +45,21 @@ def _extract_sql_strings(source_code: str) -> list[tuple[int, str]]:
     except SyntaxError:
         return results
 
+    parent_map = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
     for node in ast.walk(tree):
         # String literals
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # Bug 2 fix: skip Constant nodes that are parts of f-strings
+            if isinstance(parent_map.get(node), ast.JoinedStr):
+                continue
             val = node.value.strip()
-            if any(kw in val.lower().split() for kw in SQL_KEYWORDS):
-                if _is_valid_sql(val):
-                    results.append((node.lineno, val))
+            # Bug 1 fix: use substring search instead of split+set-membership
+            val_lower = val.lower()
+            if not any(kw in val_lower for kw in SQL_KEYWORDS):
+                continue
+            if _is_valid_sql(val):
+                results.append((node.lineno, val))
 
     return results
 
@@ -102,7 +110,7 @@ def _extract_orm_queries(
     anthropic_client,
 ) -> list[ExtractedQuery]:
     """Send changed SQLAlchemy code to Claude and get back inferred SQL."""
-    if "sqlalchemy" not in changed_file.full_content:
+    if "sqlalchemy" not in changed_file.full_content.lower():
         return []
 
     changed_line_numbers = {cl.line_number for cl in changed_file.changed_lines}
@@ -134,7 +142,7 @@ def _extract_orm_queries(
             raw = "\n".join(raw.split("\n")[1:])
         if raw.endswith("```"):
             raw = "\n".join(raw.split("\n")[:-1])
-        items = json.loads(raw)
+        items = json.loads(raw.strip())
     except Exception as e:
         logger.warning("ORM extraction failed for %s: %s", changed_file.filename, e)
         return []
@@ -145,8 +153,12 @@ def _extract_orm_queries(
         line_number = item.get("line_number", 0)
         if not sql:
             continue
-        diff_position = _find_nearest_diff_position(line_number, changed_file)
         file_lines = changed_file.full_content.splitlines()
+        # Bug 4 fix: validate line_number before using it
+        if not line_number or line_number < 1 or line_number > len(file_lines):
+            logger.warning("Skipping ORM query with invalid line_number=%s", line_number)
+            continue
+        diff_position = _find_nearest_diff_position(line_number, changed_file)
         start = max(0, line_number - 1 - 5)
         end = min(len(file_lines), line_number + 5)
         context = "\n".join(f"{i+1}: {file_lines[i]}" for i in range(start, end))

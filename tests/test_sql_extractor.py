@@ -103,6 +103,108 @@ def test_orm_extraction_malformed_json_skipped(mocker):
     assert len(orm) == 0
 
 
+def test_extracts_insert():
+    content = 'cursor.execute("INSERT INTO events (user_id, action) VALUES (1, \'click\')")\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "INSERT" in raw[0].sql
+
+
+def test_extracts_insert_returning():
+    content = 'sql = "INSERT INTO users (email) VALUES (\'a@b.com\') RETURNING id"\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "RETURNING" in raw[0].sql
+
+
+def test_extracts_update():
+    content = 'q = "UPDATE users SET last_login = NOW() WHERE id = 1"\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "UPDATE" in raw[0].sql
+
+
+def test_extracts_cte():
+    content = (
+        'q = """\n'
+        'WITH active AS (SELECT id FROM users WHERE active = true)\n'
+        'SELECT * FROM active\n'
+        '"""\n'
+    )
+    cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "WITH" in raw[0].sql
+
+
+def test_extracts_merge():
+    content = (
+        'sql = """\n'
+        'MERGE INTO inventory AS target\n'
+        'USING staging AS source ON target.sku = source.sku\n'
+        'WHEN MATCHED THEN UPDATE SET qty = source.qty\n'
+        'WHEN NOT MATCHED THEN INSERT (sku, qty) VALUES (source.sku, source.qty)\n'
+        '"""\n'
+    )
+    cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "MERGE" in raw[0].sql
+
+
+def test_extracts_multiline_string():
+    content = (
+        'sql = """\n'
+        '    SELECT u.id, u.email, o.total\n'
+        '    FROM users u\n'
+        '    JOIN orders o ON o.user_id = u.id\n'
+        '    WHERE u.active = true\n'
+        '"""\n'
+    )
+    cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "JOIN" in raw[0].sql
+
+
+def test_extracts_parenthesized_select():
+    """(SELECT ...) — substring keyword match fix ensures leading paren doesn't block detection."""
+    content = 'q = "(SELECT id FROM users WHERE active = true)"\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+
+
+def test_skips_fstring_sql_fragments():
+    """f-string SQL fragments must not be extracted as standalone queries."""
+    content = 'q = f"SELECT * FROM {table} WHERE id = {id}"\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    # The f-string literal fragments ("SELECT * FROM " etc.) must not be extracted
+    assert len(raw) == 0
+
+
+def test_extracts_text_wrapper():
+    """sqlalchemy text('SELECT ...') — the string literal inside text() is a Constant and should be found."""
+    content = 'stmt = text("SELECT id, name FROM products WHERE price > 100")\n'
+    cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
+    queries = extract_queries([cf], anthropic_client=None)
+    raw = [q for q in queries if q.source == "raw"]
+    assert len(raw) == 1
+    assert "SELECT" in raw[0].sql
+
+
 def test_orm_line_number_no_nearby_changed_line():
     content = "from sqlalchemy import select\n" + "\n" * 20 + "stmt = select(User)\n"
     # Changed line is at 22, Claude returns line_number=1 (far from any changed line)
