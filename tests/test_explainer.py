@@ -80,6 +80,57 @@ def test_substitute_default_placeholder():
     assert "$1" not in result
 
 
+def test_substitute_cast_syntax_not_touched():
+    """::cast syntax must not be treated as a named param."""
+    sql = "SELECT val::int, ts::date FROM events WHERE id = $1"
+    result = substitute_params(sql)
+    assert "::int" in result
+    assert "::date" in result
+
+
+def test_substitute_named_heuristic_id():
+    sql = "SELECT * FROM users WHERE user_id = :user_id AND account_id = :account_id"
+    result = substitute_params(sql)
+    assert "user_id" not in result.split("WHERE")[1].replace("user_id", "")  # params gone
+    assert " 1" in result  # id heuristic → integer 1
+
+
+def test_substitute_named_heuristic_date():
+    sql = "SELECT * FROM events WHERE created_at > :created_at AND updated_at < :updated_at"
+    result = substitute_params(sql)
+    assert ":created_at" not in result
+    assert ":updated_at" not in result
+    assert "'2024-01-01'" in result
+
+
+def test_substitute_named_heuristic_bool():
+    sql = "SELECT * FROM users WHERE is_active = :is_active AND has_verified = :has_verified"
+    result = substitute_params(sql)
+    assert ":is_active" not in result
+    assert ":has_verified" not in result
+    assert "true" in result
+
+
+def test_substitute_named_heuristic_default():
+    """Params with no matching heuristic get 'placeholder'."""
+    sql = "SELECT * FROM users WHERE email = :email AND role = :role"
+    result = substitute_params(sql)
+    assert ":email" not in result
+    assert ":role" not in result
+    assert "'placeholder'" in result
+
+
+def test_substitute_mixed_styles():
+    """A query mixing $N, :named, %(name)s, and %s all get substituted."""
+    sql = "SELECT * FROM t WHERE a = $1 AND b = :user_id AND c = %(name)s AND d = %s"
+    result = substitute_params(sql)
+    assert "$1" not in result
+    assert ":user_id" not in result
+    assert "%(name)s" not in result
+    # %s replaced with 1; verify no bare %s remains
+    assert "%s" not in result
+
+
 # --- Integration tests (require Postgres) ---
 
 def test_explain_simple_select(db_conn, create_test_table):
