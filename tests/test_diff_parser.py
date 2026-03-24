@@ -14,15 +14,6 @@ TOKEN = "ghtoken"
 BASE_URL = "https://api.github.com"
 
 
-def _paginated(first_page: list):
-    """Side-effect: returns first_page on page 1, [] on page 2 (breaks pagination loop)."""
-    responses = iter([
-        httpx.Response(200, json=first_page),
-        httpx.Response(200, json=[]),
-    ])
-    return lambda req: next(responses)
-
-
 def test_parse_patch_positions_single_hunk():
     patch = "@@ -10,3 +10,4 @@\n unchanged\n unchanged\n+added line\n unchanged"
     result = parse_patch_positions(patch)
@@ -47,13 +38,13 @@ def test_parse_patch_positions_no_additions():
 
 
 @respx.mock
-def test_fetch_changed_files_returns_changed_lines():
+def test_fetch_changed_files_returns_changed_lines(paginated):
     file_content = "line1\nline2\nSELECT * FROM users\nline4\n"
     encoded = base64.b64encode(file_content.encode()).decode()
     patch = "@@ -1,3 +1,4 @@\n line1\n line2\n+SELECT * FROM users\n line4"
 
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=_paginated([{"filename": "src/app.py", "status": "modified", "patch": patch}])
+        side_effect=paginated([{"filename": "src/app.py", "status": "modified", "patch": patch}])
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
@@ -75,9 +66,9 @@ def test_fetch_changed_files_returns_changed_lines():
 
 
 @respx.mock
-def test_fetch_changed_files_filters_by_pattern():
+def test_fetch_changed_files_filters_by_pattern(paginated):
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=_paginated([
+        side_effect=paginated([
             {"filename": "README.md", "status": "modified", "patch": "@@ -1 +1 @@\n+text"},
             {"filename": "src/app.py", "status": "modified", "patch": "@@ -1 +1,2 @@\n unchanged\n+new"},
         ])
@@ -97,9 +88,9 @@ def test_fetch_changed_files_filters_by_pattern():
 
 
 @respx.mock
-def test_fetch_changed_files_skips_file_without_patch():
+def test_fetch_changed_files_skips_file_without_patch(paginated):
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=_paginated([{"filename": "src/big.py", "status": "modified"}])  # no patch key
+        side_effect=paginated([{"filename": "src/big.py", "status": "modified"}])  # no patch key
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "main"}})
@@ -107,3 +98,44 @@ def test_fetch_changed_files_skips_file_without_patch():
 
     files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])
     assert files == []
+
+
+@respx.mock
+def test_fetch_changed_files_skips_removed_file(paginated):
+    patch = "@@ -1,3 +1,4 @@\n line1\n line2\n+SELECT * FROM users\n line4"
+
+    respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
+        side_effect=paginated([{"filename": "src/app.py", "status": "removed", "patch": patch}])
+    )
+    respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
+        return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
+    )
+
+    files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])
+    assert files == []
+
+
+@respx.mock
+def test_fetch_changed_files_url_encodes_path(paginated):
+    """A filename with a space is URL-encoded when fetching file contents."""
+    filename = "src/my module.py"
+    encoded_filename = "src/my%20module.py"
+    file_content = "line1\nSELECT * FROM users\n"
+    encoded_content = base64.b64encode(file_content.encode()).decode()
+    patch = "@@ -1,1 +1,2 @@\n line1\n+SELECT * FROM users"
+
+    respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
+        side_effect=paginated([{"filename": filename, "status": "modified", "patch": patch}])
+    )
+    respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
+        return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
+    )
+    respx.get(f"{BASE_URL}/repos/{REPO}/contents/{encoded_filename}").mock(
+        return_value=httpx.Response(200, json={"content": encoded_content, "encoding": "base64"})
+    )
+
+    files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])
+
+    assert len(files) == 1
+    assert files[0].filename == filename
+    assert files[0].full_content == file_content

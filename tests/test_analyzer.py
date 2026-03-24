@@ -123,3 +123,30 @@ def test_analyze_multiple_files_correct_filenames():
     findings = analyze_results([result_a, result_b], mock_client)
     assert len(findings) == 2
     assert {f.filename for f in findings} == {"src/a.py", "src/b.py"}
+
+
+def test_analyze_empty_summary_retries():
+    """Claude returns empty summary; validator rejects it and retries. Second response is valid."""
+    result = make_result("SELECT 1", SAMPLE_PLAN)
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _tool_response("report_finding", {"severity": "warning", "summary": "", "suggestion": None, "has_suggestion": False}),
+        _finding_response(severity="warning", summary="Non-empty summary"),
+    ]
+    findings = analyze_results([result], mock_client)
+    assert mock_client.messages.create.call_count == 2
+    assert len(findings) == 1
+    assert findings[0].summary != ""
+
+
+def test_analyze_inconsistent_has_suggestion():
+    """Claude returns has_suggestion=True but suggestion=None; validator rejects and retries."""
+    result = make_result("SELECT 1", SAMPLE_PLAN)
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _tool_response("report_finding", {"severity": "warning", "summary": "Issue found", "suggestion": None, "has_suggestion": True}),
+        _finding_response(severity="warning", summary="Issue found", suggestion="CREATE INDEX ...", has_suggestion=True),
+    ]
+    findings = analyze_results([result], mock_client)
+    assert mock_client.messages.create.call_count == 2
+    assert len(findings) == 1

@@ -69,6 +69,8 @@ def _validate(data: dict) -> str | None:
         return f"severity must be one of {sorted(_VALID_SEVERITIES)}, got {data.get('severity')!r}"
     if not isinstance(data.get("summary"), str) or not data["summary"]:
         return "summary must be a non-empty string"
+    if data.get("has_suggestion") is True and data.get("suggestion") is None:
+        return "has_suggestion is True but suggestion is null"
     return None
 
 

@@ -31,10 +31,15 @@ def load_config(path: Path) -> Config:
     if setup_command is not None and not isinstance(setup_command, str):
         raise ConfigError("'setup_command' must be a string")
 
-    if not file_patterns:
+    if file_patterns is None:
         raise ConfigError("Config must include 'file_patterns'")
     if not isinstance(file_patterns, list):
         raise ConfigError("'file_patterns' must be a list of strings")
+    if len(file_patterns) == 0:
+        raise ConfigError("'file_patterns' must not be empty")
+
+    if schema_file is not None and schema_file == "":
+        raise ConfigError("'schema_file' must not be an empty string")
 
     has_schema = bool(schema_file)
     has_command = bool(setup_command)

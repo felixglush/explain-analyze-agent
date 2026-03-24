@@ -19,8 +19,21 @@ dev = [
     "pytest>=8",
     "pytest-mock>=3.14",
     "respx>=0.21",
+    "pytest-cov>=4",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sql_reviewer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["sql_reviewer"]
+omit = ["*/test_*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
