@@ -18,6 +18,9 @@ on:
 
 jobs:
   sql-review:
+    permissions:
+      pull-requests: write
+      contents: read
     uses: felixglush/explain-analyze-agent/.github/workflows/sql-review.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
