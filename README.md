@@ -39,13 +39,16 @@ Go to Settings → Secrets and variables → Actions → New repository secret.
 ## Running tests
 
 ```bash
-pip install -e ".[dev]"
+uv sync --extra dev
 
-# Unit tests (no database required):
-pytest tests/ -v -k "not test_explain"
+# Start Postgres (required for integration tests):
+docker compose up -d
 
-# Integration tests (requires Postgres):
-DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review pytest tests/ -v
+# Run all tests:
+uv run pytest --cov --cov-report=term-missing
+
+# Unit tests only (no database required — integration tests auto-skip if DB is unavailable):
+uv run pytest tests/ -v
 ```
 
 ## Local end-to-end testing
@@ -54,10 +57,8 @@ To run the tool locally against a real PR:
 
 ```bash
 # 1. Start Postgres and load the sample schema
-docker run -d --name sql-review-local \
-  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=sql_review \
-  -p 5432:5432 postgres:16
-psql postgresql://postgres:test@localhost:5432/sql_review -f tests/fixtures/sample_schema.sql
+docker compose up -d
+psql postgresql://postgres:test@localhost:5434/sql_review -f tests/fixtures/sample_schema.sql
 
 # 2. Copy the sample config to your project root and edit file_patterns
 cp tests/fixtures/.sql-reviewer.yml .sql-reviewer.yml
@@ -67,10 +68,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export GITHUB_TOKEN=github_pat_...   # needs pull-requests:write + contents:read
 export REPO=owner/your-repo
 export PR_NUMBER=123
-export DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review
+export DATABASE_URL=postgresql://postgres:test@localhost:5434/sql_review
 
 # 4. Run
-python -m sql_reviewer
+uv run python -m sql_reviewer
 ```
 
 ## Configuration reference
