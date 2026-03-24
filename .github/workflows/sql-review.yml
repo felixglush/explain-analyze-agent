@@ -52,6 +52,8 @@ jobs:
           path: .sql-reviewer-tool
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
 
       - name: Install sql_reviewer
         run: uv pip install --system .sql-reviewer-tool/
