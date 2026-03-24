@@ -130,7 +130,7 @@ def test_substitute_mixed_styles():
     assert "$1" not in result
     assert ":user_id" not in result
     assert "%(name)s" not in result
-    # %s replaced with 1; verify no bare %s remains
+    # %s replaced with 'placeholder'; verify no bare %s remains
     assert "%s" not in result
 
 
@@ -197,7 +197,7 @@ def test_explain_psycopg2_params(db_conn, create_test_table):
     """psycopg2-style %(name)s and bare %s params are substituted and produce valid plans."""
     queries = [
         make_query("SELECT * FROM test_users WHERE id = %(user_id)s", line=1),
-        make_query("SELECT * FROM test_users WHERE id = %s", line=2),
+        make_query("SELECT * FROM test_users WHERE name = %s", line=2),
     ]
     results = explain_queries(queries, DB_URL)
     assert len(results) == 2
