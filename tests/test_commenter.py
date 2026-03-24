@@ -77,11 +77,16 @@ def test_post_findings_with_inline_comments():
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
-    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
+    review_route = respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
         return_value=httpx.Response(200, json={"id": 1})
     )
 
     post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=3)
+
+    assert review_route.called, "POST /reviews should be called for inline findings"
+    body = _json.loads(review_route.calls[0].request.content)
+    assert len(body["comments"]) == 1
+    assert body["comments"][0]["position"] == 4
 
 
 @respx.mock
@@ -196,6 +201,142 @@ def test_post_findings_skips_identical_comment(paginated):
 
     assert not delete_route.called, "DELETE should not be called for identical comment"
     assert not post_route.called, "POST /reviews should not be called for identical comment"
+
+
+@respx.mock
+def test_post_all_unanchored_findings_uses_issue_comment():
+    """All findings have diff_position=None → posts issue-level summary with each finding listed."""
+    findings = [
+        make_finding(diff_pos=None, severity="warning"),
+        Finding(
+            filename="src/b.py",
+            line_number=2,
+            diff_position=None,
+            severity="critical",
+            summary="Full table scan",
+            suggestion=None,
+            has_suggestion=False,
+            plan_text="Seq Scan on orders",
+        ),
+    ]
+
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    issue_route = respx.post(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+
+    post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=2)
+
+    assert issue_route.called
+    body = _json.loads(issue_route.calls[0].request.content)["body"]
+    assert "could not be anchored" in body
+    assert "⚠️" in body
+    assert "🔴" in body
+
+
+@respx.mock
+def test_post_no_findings_deletes_stale_review_comments(paginated):
+    """Stale bot review comments are deleted even when there are no new findings."""
+    stale_review = {
+        "id": 300,
+        "path": "src/app.py",
+        "position": 5,
+        "body": f"{MARKER}\nold finding",
+    }
+
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(side_effect=paginated([stale_review]))
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    delete_route = respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/300").mock(
+        return_value=httpx.Response(204)
+    )
+    respx.post(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+
+    post_findings([], REPO, PR_NUMBER, TOKEN, total_queries=1)
+
+    assert delete_route.called
+
+
+@respx.mock
+def test_post_no_findings_replaces_changed_issue_comment(paginated):
+    """Stale 'no issues' issue comment is deleted and replaced when the body differs."""
+    old_body = f"{MARKER} SQL Review: no issues found in 3 queries analyzed"
+    existing_issue = {"id": 400, "body": old_body}
+
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    # paginated so _fetch_existing_bot_issue_comments exercises its extend/page+1 branch
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        side_effect=paginated([existing_issue])
+    )
+    delete_route = respx.delete(f"{BASE}/repos/{REPO}/issues/comments/400").mock(
+        return_value=httpx.Response(204)
+    )
+    post_route = respx.post(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+
+    # total_queries=1 → "1 query" body differs from the existing "3 queries" comment
+    post_findings([], REPO, PR_NUMBER, TOKEN, total_queries=1)
+
+    assert delete_route.called
+    assert post_route.called
+
+
+@respx.mock
+def test_post_findings_deletes_stale_issue_comment(paginated):
+    """Stale 'no issues' issue comment is deleted when new findings are being posted."""
+    stale_issue = {"id": 500, "body": f"{MARKER} SQL Review: no issues found in 1 query analyzed"}
+
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(side_effect=paginated([stale_issue]))
+    delete_route = respx.delete(f"{BASE}/repos/{REPO}/issues/comments/500").mock(
+        return_value=httpx.Response(204)
+    )
+    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+
+    post_findings([make_finding(diff_pos=3)], REPO, PR_NUMBER, TOKEN, total_queries=1)
+
+    assert delete_route.called
+
+
+@respx.mock
+def test_post_findings_deduplicates_same_position():
+    """Two findings at the same (filename, diff_position) — only the first is posted."""
+    findings = [make_finding(diff_pos=5), make_finding(diff_pos=5)]
+
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+
+    posted_bodies = []
+
+    def capture(request, route):
+        posted_bodies.append(_json.loads(request.content))
+        return httpx.Response(200, json={"id": 1})
+
+    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(side_effect=capture)
+
+    post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=2)
+
+    assert len(posted_bodies) == 1
+    assert len(posted_bodies[0]["comments"]) == 1
 
 
 @respx.mock

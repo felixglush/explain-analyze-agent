@@ -56,7 +56,7 @@ def test_only_extracts_changed_lines():
     assert "users" in raw[0].sql
 
 
-def test_no_sqlalchemy_import_skips_orm(mocker):
+def test_no_sqlalchemy_import_skips_orm():
     content = "result = session.query(User).filter(User.active == True).all()\n"
     cf = make_changed_file("src/app.py", {1: content.strip()}, full_content=content)
     # No sqlalchemy import in the file → ORM path not triggered
@@ -65,7 +65,7 @@ def test_no_sqlalchemy_import_skips_orm(mocker):
     assert len(orm) == 0
 
 
-def test_orm_extraction_with_sqlalchemy(mocker):
+def test_orm_extraction_with_sqlalchemy():
     content = (
         "from sqlalchemy import select\n"
         "stmt = select(User).where(User.active == True)\n"
