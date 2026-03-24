@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sql-reviewer"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg2-binary>=2.9.11",
+    "anthropic>=0.86.0",
+    "httpx>=0.28.1",
+    "sqlglot>=30.0.3",
+    "PyYAML>=6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-mock>=3.15.1",
+    "respx>=0.22.0",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sql_reviewer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["sql_reviewer"]
+omit = ["*/test_*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

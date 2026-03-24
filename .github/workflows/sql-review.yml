@@ -1,0 +1,68 @@
+name: SQL Review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: "PR number to review"
+        required: true
+        type: string
+      repo:
+        description: "Repository in owner/name format"
+        required: true
+        type: string
+      tool_ref:
+        description: "Branch/tag of explain-analyze-agent to install"
+        required: false
+        type: string
+        default: "main"
+    secrets:
+      anthropic_api_key:
+        required: true
+
+jobs:
+  sql-review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write  # post and delete inline review comments
+      contents: read        # fetch file content from the PR branch
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sql_review
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout calling repo (for .sql-reviewer.yml)
+        uses: actions/checkout@v4
+
+      - name: Checkout sql_reviewer tool
+        uses: actions/checkout@v4
+        with:
+          repository: felixglush/explain-analyze-agent
+          ref: ${{ inputs.tool_ref }}
+          path: .sql-reviewer-tool
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install sql_reviewer
+        run: pip install .sql-reviewer-tool/
+
+      - name: Run SQL review
+        run: python -m sql_reviewer
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:5432/sql_review
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPO: ${{ inputs.repo }}
