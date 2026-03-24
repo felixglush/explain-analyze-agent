@@ -4,6 +4,7 @@ import fnmatch
 import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 import httpx
 
@@ -31,10 +32,10 @@ def parse_patch_positions(patch: str) -> dict[int, int]:
     current_new_line = 0
     position = 0
 
-    for line in patch.split("\n"):
+    for line in patch.splitlines():
         position += 1
         if line.startswith("@@"):
-            m = re.search(r"\+(\d+)", line)
+            m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)", line)
             if m:
                 current_new_line = int(m.group(1)) - 1
         elif line.startswith("+"):
@@ -83,16 +84,25 @@ def fetch_changed_files(
     pr_resp.raise_for_status()
     head_ref = pr_resp.json()["head"]["ref"]
 
-    # Get list of changed files
-    files_resp = httpx.get(
-        f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/files",
-        headers=headers,
-    )
-    files_resp.raise_for_status()
+    # Get list of changed files (paginated; GitHub caps at 30 by default)
+    all_files: list[dict] = []
+    page = 1
+    while True:
+        files_resp = httpx.get(
+            f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/files",
+            headers=headers,
+            params={"per_page": 100, "page": page},
+        )
+        files_resp.raise_for_status()
+        page_data = files_resp.json()
+        if not page_data:
+            break
+        all_files.extend(page_data)
+        page += 1
 
     results: list[ChangedFile] = []
 
-    for file_info in files_resp.json():
+    for file_info in all_files:
         filename = file_info["filename"]
         patch = file_info.get("patch")
 
@@ -103,9 +113,9 @@ def fetch_changed_files(
         if not _matches_patterns(filename, file_patterns):
             continue
 
-        # Fetch full file content
+        # Fetch full file content (URL-encode path to handle spaces and special chars)
         content_resp = httpx.get(
-            f"{GITHUB_API}/repos/{repo}/contents/{filename}",
+            f"{GITHUB_API}/repos/{repo}/contents/{quote(filename, safe='/')}",
             headers=headers,
             params={"ref": head_ref},
         )

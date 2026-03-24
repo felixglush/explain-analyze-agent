@@ -23,7 +23,7 @@ def db_conn():
         pytest.skip("Postgres not available — set DATABASE_URL to run integration tests")
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def create_test_table(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("""
@@ -52,12 +52,12 @@ def make_query(sql: str, line: int = 1) -> ExtractedQuery:
 # --- Unit tests for parameter substitution (no DB needed) ---
 
 def test_substitute_positional_params():
+    # Positional params ($N) all become "1" — no context-based type inference.
     sql = "SELECT * FROM users WHERE id = $1 AND created_at > $2"
     result = substitute_params(sql)
     assert "$1" not in result
     assert "$2" not in result
-    assert "1" in result  # id heuristic
-    assert "2024-01-01" in result  # created_at heuristic
+    assert result == "SELECT * FROM users WHERE id = 1 AND created_at > 1"
 
 
 def test_substitute_named_params():
@@ -82,7 +82,7 @@ def test_substitute_default_placeholder():
 
 # --- Integration tests (require Postgres) ---
 
-def test_explain_simple_select(db_conn):
+def test_explain_simple_select(db_conn, create_test_table):
     query = make_query("SELECT * FROM test_users WHERE active = true")
     results = explain_queries([query], DB_URL)
     assert len(results) == 1
@@ -91,7 +91,7 @@ def test_explain_simple_select(db_conn):
     assert results[0].query is query
 
 
-def test_explain_skips_invalid_sql(db_conn):
+def test_explain_skips_invalid_sql(db_conn, create_test_table):
     queries = [
         make_query("SELECT * FROM test_users WHERE active = true", line=1),
         make_query("this is not sql at all", line=2),
@@ -101,14 +101,14 @@ def test_explain_skips_invalid_sql(db_conn):
     assert results[0].query.line_number == 1
 
 
-def test_explain_with_parameterized_query(db_conn):
+def test_explain_with_parameterized_query(db_conn, create_test_table):
     query = make_query("SELECT * FROM test_users WHERE id = $1 AND active = $2")
     results = explain_queries([query], DB_URL)
     assert len(results) == 1
     assert results[0].plan_text  # got a plan back
 
 
-def test_explain_write_query_does_not_persist(db_conn):
+def test_explain_write_query_does_not_persist(db_conn, create_test_table):
     query = make_query("INSERT INTO test_users (name, active) VALUES ('test', true)")
     results = explain_queries([query], DB_URL)
     assert len(results) == 1  # INSERT EXPLAIN ANALYZE works

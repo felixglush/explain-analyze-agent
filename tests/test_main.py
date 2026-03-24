@@ -1,7 +1,6 @@
-import os
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+from unittest.mock import patch
+from sql_reviewer.main import main
 
 
 def test_main_exits_1_on_missing_config(tmp_path, monkeypatch):
@@ -12,7 +11,6 @@ def test_main_exits_1_on_missing_config(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/test")
 
-    from sql_reviewer.main import main
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 1
@@ -30,12 +28,8 @@ def test_main_exits_0_when_no_files_match(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/test")
 
-    with patch("sql_reviewer.main.fetch_changed_files", return_value=[]), \
-         patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        from sql_reviewer import main as main_mod
-        import importlib; importlib.reload(main_mod)
-        from sql_reviewer.main import main
+    # Schema setup runs after the file-match check, so it's never reached here.
+    with patch("sql_reviewer.main.fetch_changed_files", return_value=[]):
         with pytest.raises(SystemExit) as exc:
             main()
-        assert exc.value.code == 0
+    assert exc.value.code == 0

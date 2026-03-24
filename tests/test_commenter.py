@@ -99,10 +99,10 @@ def test_post_findings_deletes_old_comments():
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
-    respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/101").mock(
+    delete_101 = respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/101").mock(
         return_value=httpx.Response(204)
     )
-    respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/102").mock(
+    delete_102 = respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/102").mock(
         return_value=httpx.Response(204)
     )
     respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
@@ -110,6 +110,9 @@ def test_post_findings_deletes_old_comments():
     )
 
     post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=1)
+
+    assert delete_101.called, "stale comment 101 should have been deleted"
+    assert delete_102.called, "stale comment 102 should have been deleted"
 
 
 @respx.mock

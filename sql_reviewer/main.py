@@ -33,17 +33,20 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _run_schema_setup(config_path: Path, schema_file: str | None, setup_command: str | None) -> None:
+def _run_schema_setup(config_path: Path, schema_file: str | None, setup_command: str | None, database_url: str) -> None:
     if schema_file:
         schema_path = config_path.parent / schema_file
         if not schema_path.exists():
             logger.error("schema_file not found: %s", schema_path)
             sys.exit(1)
-        database_url = os.environ["DATABASE_URL"]
         cmd = f"psql {database_url} -f {schema_path}"
         logger.info("Applying schema: %s", cmd)
     else:
         cmd = setup_command
+
+    if not cmd:
+        logger.error("No schema_file or setup_command configured")
+        sys.exit(1)
 
     result = subprocess.run(cmd, shell=True, env=os.environ.copy())
     if result.returncode != 0:
@@ -72,10 +75,7 @@ def main() -> None:
         logger.error("Configuration error: %s", e)
         sys.exit(1)
 
-    # 2. Run schema setup
-    _run_schema_setup(config_path, config.schema_file, config.setup_command)
-
-    # 3. Fetch PR diff
+    # 2. Fetch PR diff
     logger.info("Fetching PR #%d diff from %s", pr_number, repo)
     try:
         changed_files = fetch_changed_files(repo, pr_number, token, config.file_patterns)
@@ -87,6 +87,9 @@ def main() -> None:
         logger.info("No matching Python files changed in PR #%d — nothing to review", pr_number)
         sys.exit(0)
 
+    # 3. Run schema setup
+    _run_schema_setup(config_path, config.schema_file, config.setup_command, database_url)
+
     # 4. Extract SQL queries
     anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
     queries = extract_queries(changed_files, anthropic_client)
@@ -94,12 +97,19 @@ def main() -> None:
 
     if not queries:
         logger.info("No SQL queries found in changed files — nothing to review")
-        post_findings([], repo, pr_number, token, total_queries=0)
         sys.exit(0)
 
     # 5. Run EXPLAIN ANALYZE
-    explain_results = explain_queries(queries, database_url)
+    try:
+        explain_results = explain_queries(queries, database_url)
+    except Exception as e:
+        logger.error("Failed to run EXPLAIN ANALYZE: %s", e)
+        sys.exit(1)
     logger.info("%d/%d queries explained successfully", len(explain_results), len(queries))
+
+    if not explain_results:
+        logger.error("All %d quer%s failed EXPLAIN ANALYZE — aborting", len(queries), "y" if len(queries) == 1 else "ies")
+        sys.exit(1)
 
     # 6. Analyze with Claude
     findings = analyze_results(explain_results, anthropic_client)

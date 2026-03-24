@@ -71,9 +71,13 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
                     cur.execute("SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,))
                     try:
                         statements = sqlglot.parse(sql)
-                        if not statements or not isinstance(statements[0], sqlglot.expressions.Select):
+                        if statements and isinstance(
+                            statements[0],
+                            (sqlglot.expressions.Create, sqlglot.expressions.Drop,
+                             sqlglot.expressions.AlterTable, sqlglot.expressions.TruncateTable),
+                        ):
                             logger.warning(
-                                "Skipping non-SELECT statement for EXPLAIN ANALYZE in %s line %d",
+                                "Skipping DDL statement for EXPLAIN ANALYZE in %s line %d",
                                 query.filename, query.line_number,
                             )
                             continue

@@ -26,15 +26,22 @@ def load_config(path: Path) -> Config:
     setup_command = raw.get("setup_command")
     file_patterns = raw.get("file_patterns")
 
+    if schema_file is not None and not isinstance(schema_file, str):
+        raise ConfigError("'schema_file' must be a string")
+    if setup_command is not None and not isinstance(setup_command, str):
+        raise ConfigError("'setup_command' must be a string")
+
     if not file_patterns:
         raise ConfigError("Config must include 'file_patterns'")
+    if not isinstance(file_patterns, list):
+        raise ConfigError("'file_patterns' must be a list of strings")
 
     has_schema = bool(schema_file)
     has_command = bool(setup_command)
-    if has_schema == has_command:  # both True or both False
-        raise ConfigError(
-            "Config must set exactly one of 'schema_file' or 'setup_command'"
-        )
+    if has_schema and has_command:
+        raise ConfigError("Config must set exactly one of 'schema_file' or 'setup_command', not both")
+    if not has_schema and not has_command:
+        raise ConfigError("Config must set exactly one of 'schema_file' or 'setup_command'")
 
     return Config(
         schema_file=schema_file,
