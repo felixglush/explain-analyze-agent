@@ -44,9 +44,13 @@ def load_config(path: Path) -> Config:
     has_schema = bool(schema_file)
     has_command = bool(setup_command)
     if has_schema and has_command:
-        raise ConfigError("Config must set exactly one of 'schema_file' or 'setup_command', not both")
+        raise ConfigError(
+            "Config must set exactly one of 'schema_file' or 'setup_command', not both"
+        )
     if not has_schema and not has_command:
-        raise ConfigError("Config must set exactly one of 'schema_file' or 'setup_command'")
+        raise ConfigError(
+            "Config must set exactly one of 'schema_file' or 'setup_command'"
+        )
 
     return Config(
         schema_file=schema_file,

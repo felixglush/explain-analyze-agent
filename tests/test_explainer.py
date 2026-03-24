@@ -2,14 +2,16 @@
 Integration tests — require a real Postgres instance.
 Set DATABASE_URL=postgresql://postgres:test@localhost:5432/sql_review before running.
 """
+
 import os
 import pytest
 import psycopg2
-from sql_reviewer.diff_parser import ChangedLine
 from sql_reviewer.sql_extractor import ExtractedQuery
 from sql_reviewer.explainer import explain_queries, substitute_params, ExplainResult
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:test@localhost:5432/sql_review")
+DB_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://postgres:test@localhost:5432/sql_review"
+)
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +22,9 @@ def db_conn():
         yield conn
         conn.close()
     except Exception:
-        pytest.skip("Postgres not available — set DATABASE_URL to run integration tests")
+        pytest.skip(
+            "Postgres not available — set DATABASE_URL to run integration tests"
+        )
 
 
 @pytest.fixture(scope="module")
@@ -50,6 +54,7 @@ def make_query(sql: str, line: int = 1) -> ExtractedQuery:
 
 
 # --- Unit tests for parameter substitution (no DB needed) ---
+
 
 def test_substitute_positional_params():
     # Positional params ($N) all become "1" — no context-based type inference.
@@ -91,7 +96,9 @@ def test_substitute_cast_syntax_not_touched():
 def test_substitute_named_heuristic_id():
     sql = "SELECT * FROM users WHERE user_id = :user_id AND account_id = :account_id"
     result = substitute_params(sql)
-    assert "user_id" not in result.split("WHERE")[1].replace("user_id", "")  # params gone
+    assert "user_id" not in result.split("WHERE")[1].replace(
+        "user_id", ""
+    )  # params gone
     assert " 1" in result  # id heuristic → integer 1
 
 
@@ -132,6 +139,7 @@ def test_substitute_mixed_styles():
 
 
 # --- Integration tests (require Postgres) ---
+
 
 def test_explain_simple_select(db_conn, create_test_table):
     query = make_query("SELECT * FROM test_users WHERE active = true")

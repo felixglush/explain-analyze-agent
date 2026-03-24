@@ -33,7 +33,12 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _run_schema_setup(config_path: Path, schema_file: str | None, setup_command: str | None, database_url: str) -> None:
+def _run_schema_setup(
+    config_path: Path,
+    schema_file: str | None,
+    setup_command: str | None,
+    database_url: str,
+) -> None:
     if schema_file:
         schema_path = config_path.parent / schema_file
         if not schema_path.exists():
@@ -78,22 +83,30 @@ def main() -> None:
     # 2. Fetch PR diff
     logger.info("Fetching PR #%d diff from %s", pr_number, repo)
     try:
-        changed_files = fetch_changed_files(repo, pr_number, token, config.file_patterns)
+        changed_files = fetch_changed_files(
+            repo, pr_number, token, config.file_patterns
+        )
     except Exception as e:
         logger.error("Failed to fetch PR diff: %s", e)
         sys.exit(1)
 
     if not changed_files:
-        logger.info("No matching Python files changed in PR #%d — nothing to review", pr_number)
+        logger.info(
+            "No matching Python files changed in PR #%d — nothing to review", pr_number
+        )
         sys.exit(0)
 
     # 3. Run schema setup
-    _run_schema_setup(config_path, config.schema_file, config.setup_command, database_url)
+    _run_schema_setup(
+        config_path, config.schema_file, config.setup_command, database_url
+    )
 
     # 4. Extract SQL queries
     anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
     queries = extract_queries(changed_files, anthropic_client)
-    logger.info("Extracted %d SQL quer%s", len(queries), "y" if len(queries) == 1 else "ies")
+    logger.info(
+        "Extracted %d SQL quer%s", len(queries), "y" if len(queries) == 1 else "ies"
+    )
 
     if not queries:
         logger.info("No SQL queries found in changed files — nothing to review")
@@ -105,10 +118,16 @@ def main() -> None:
     except Exception as e:
         logger.error("Failed to run EXPLAIN ANALYZE: %s", e)
         sys.exit(1)
-    logger.info("%d/%d queries explained successfully", len(explain_results), len(queries))
+    logger.info(
+        "%d/%d queries explained successfully", len(explain_results), len(queries)
+    )
 
     if not explain_results:
-        logger.error("All %d quer%s failed EXPLAIN ANALYZE — aborting", len(queries), "y" if len(queries) == 1 else "ies")
+        logger.error(
+            "All %d quer%s failed EXPLAIN ANALYZE — aborting",
+            len(queries),
+            "y" if len(queries) == 1 else "ies",
+        )
         sys.exit(1)
 
     # 6. Analyze with Claude

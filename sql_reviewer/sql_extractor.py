@@ -21,7 +21,7 @@ class ExtractedQuery:
     line_number: int
     diff_position: int | None  # None if no nearby changed line (ORM path)
     source: Literal["raw", "orm"]
-    source_context: str = ""   # 5 lines before/after the query for Claude's prompt
+    source_context: str = ""  # 5 lines before/after the query for Claude's prompt
 
 
 def _is_valid_sql(text: str) -> bool:
@@ -45,7 +45,9 @@ def _extract_sql_strings(source_code: str) -> list[tuple[int, str]]:
     except SyntaxError:
         return results
 
-    parent_map = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    parent_map = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
 
     for node in ast.walk(tree):
         # String literals
@@ -66,7 +68,9 @@ def _extract_sql_strings(source_code: str) -> list[tuple[int, str]]:
 
 def _extract_raw_queries(changed_file: ChangedFile) -> list[ExtractedQuery]:
     changed_line_numbers = {cl.line_number for cl in changed_file.changed_lines}
-    line_to_position = {cl.line_number: cl.diff_position for cl in changed_file.changed_lines}
+    line_to_position = {
+        cl.line_number: cl.diff_position for cl in changed_file.changed_lines
+    }
 
     all_sql = _extract_sql_strings(changed_file.full_content)
     queries = []
@@ -76,15 +80,17 @@ def _extract_raw_queries(changed_file: ChangedFile) -> list[ExtractedQuery]:
         lines = changed_file.full_content.splitlines()
         start = max(0, line_num - 1 - 5)
         end = min(len(lines), line_num + 5)
-        context = "\n".join(f"{i+1}: {lines[i]}" for i in range(start, end))
-        queries.append(ExtractedQuery(
-            sql=sql,
-            filename=changed_file.filename,
-            line_number=line_num,
-            diff_position=line_to_position.get(line_num),
-            source="raw",
-            source_context=context,
-        ))
+        context = "\n".join(f"{i + 1}: {lines[i]}" for i in range(start, end))
+        queries.append(
+            ExtractedQuery(
+                sql=sql,
+                filename=changed_file.filename,
+                line_number=line_num,
+                diff_position=line_to_position.get(line_num),
+                source="raw",
+                source_context=context,
+            )
+        )
     return queries
 
 
@@ -94,7 +100,9 @@ def _find_nearest_diff_position(
     window: int = 10,
 ) -> int | None:
     """Find the diff_position of the nearest changed line within `window` lines."""
-    line_to_position = {cl.line_number: cl.diff_position for cl in changed_file.changed_lines}
+    line_to_position = {
+        cl.line_number: cl.diff_position for cl in changed_file.changed_lines
+    }
     if line_number in line_to_position:
         return line_to_position[line_number]
     for delta in range(1, window + 1):
@@ -116,7 +124,7 @@ def _extract_orm_queries(
     changed_line_numbers = {cl.line_number for cl in changed_file.changed_lines}
     lines = changed_file.full_content.splitlines()
     changed_code = "\n".join(
-        f"{i+1}: {lines[i]}"
+        f"{i + 1}: {lines[i]}"
         for i in range(len(lines))
         if (i + 1) in changed_line_numbers
     )
@@ -156,20 +164,24 @@ def _extract_orm_queries(
         file_lines = changed_file.full_content.splitlines()
         # Bug 4 fix: validate line_number before using it
         if not line_number or line_number < 1 or line_number > len(file_lines):
-            logger.warning("Skipping ORM query with invalid line_number=%s", line_number)
+            logger.warning(
+                "Skipping ORM query with invalid line_number=%s", line_number
+            )
             continue
         diff_position = _find_nearest_diff_position(line_number, changed_file)
         start = max(0, line_number - 1 - 5)
         end = min(len(file_lines), line_number + 5)
-        context = "\n".join(f"{i+1}: {file_lines[i]}" for i in range(start, end))
-        queries.append(ExtractedQuery(
-            sql=sql,
-            filename=changed_file.filename,
-            line_number=line_number,
-            diff_position=diff_position,
-            source="orm",
-            source_context=context,
-        ))
+        context = "\n".join(f"{i + 1}: {file_lines[i]}" for i in range(start, end))
+        queries.append(
+            ExtractedQuery(
+                sql=sql,
+                filename=changed_file.filename,
+                line_number=line_number,
+                diff_position=diff_position,
+                source="orm",
+                source_context=context,
+            )
+        )
     return queries
 
 

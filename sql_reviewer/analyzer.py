@@ -21,8 +21,14 @@ _TOOLS = [
             "type": "object",
             "properties": {
                 "severity": {"type": "string", "enum": ["info", "warning", "critical"]},
-                "summary": {"type": "string", "description": "One-line description of the issue"},
-                "suggestion": {"type": ["string", "null"], "description": "SQL or config fix, or null"},
+                "summary": {
+                    "type": "string",
+                    "description": "One-line description of the issue",
+                },
+                "suggestion": {
+                    "type": ["string", "null"],
+                    "description": "SQL or config fix, or null",
+                },
                 "has_suggestion": {"type": "boolean"},
             },
             "required": ["severity", "summary", "suggestion", "has_suggestion"],
@@ -87,7 +93,12 @@ def _analyze_one(result: ExplainResult, anthropic_client) -> Finding | None:
                 messages=messages,
             )
         except Exception as e:
-            logger.warning("API call failed for %s:%s: %s", result.query.filename, result.query.line_number, e)
+            logger.warning(
+                "API call failed for %s:%s: %s",
+                result.query.filename,
+                result.query.line_number,
+                e,
+            )
             return None
 
         tool_block = next((b for b in message.content if b.type == "tool_use"), None)
@@ -102,12 +113,18 @@ def _analyze_one(result: ExplainResult, anthropic_client) -> Finding | None:
                 messages = [
                     *messages,
                     {"role": "assistant", "content": message.content},
-                    {"role": "user", "content": f"Validation failed: {error}. Please call a tool again with the correct format."},
+                    {
+                        "role": "user",
+                        "content": f"Validation failed: {error}. Please call a tool again with the correct format.",
+                    },
                 ]
                 continue
             logger.warning(
                 "Analyzer validation failed for %s:%s after %d attempts: %s",
-                result.query.filename, result.query.line_number, MAX_RETRIES, error,
+                result.query.filename,
+                result.query.line_number,
+                MAX_RETRIES,
+                error,
             )
             return None
 

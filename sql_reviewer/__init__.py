@@ -5,8 +5,10 @@ from sql_reviewer.explainer import ExplainResult
 from sql_reviewer.analyzer import Finding
 
 __all__ = [
-    "Config", "ConfigError",
-    "ChangedFile", "ChangedLine",
+    "Config",
+    "ConfigError",
+    "ChangedFile",
+    "ChangedLine",
     "ExtractedQuery",
     "ExplainResult",
     "Finding",

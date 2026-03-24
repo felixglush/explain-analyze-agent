@@ -53,7 +53,9 @@ class ExplainResult:
     plan_text: str
 
 
-def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[ExplainResult]:
+def explain_queries(
+    queries: list[ExtractedQuery], database_url: str
+) -> list[ExplainResult]:
     results: list[ExplainResult] = []
 
     try:
@@ -68,17 +70,24 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
             sql = substitute_params(query.sql)
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,))
+                    cur.execute(
+                        "SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,)
+                    )
                     try:
                         statements = sqlglot.parse(sql)
                         if statements and isinstance(
                             statements[0],
-                            (sqlglot.expressions.Create, sqlglot.expressions.Drop,
-                             sqlglot.expressions.AlterTable, sqlglot.expressions.TruncateTable),
+                            (
+                                sqlglot.expressions.Create,
+                                sqlglot.expressions.Drop,
+                                sqlglot.expressions.AlterTable,
+                                sqlglot.expressions.TruncateTable,
+                            ),
                         ):
                             logger.warning(
                                 "Skipping DDL statement for EXPLAIN ANALYZE in %s line %d",
-                                query.filename, query.line_number,
+                                query.filename,
+                                query.line_number,
                             )
                             continue
                     except sqlglot.errors.ParseError:
@@ -93,7 +102,9 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
             except Exception as e:
                 logger.warning(
                     "EXPLAIN ANALYZE failed for query in %s line %d: %s",
-                    query.filename, query.line_number, e,
+                    query.filename,
+                    query.line_number,
+                    e,
                 )
                 conn.rollback()
     finally:

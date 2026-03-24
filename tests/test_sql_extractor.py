@@ -1,16 +1,19 @@
-import pytest
 from unittest.mock import MagicMock
 from sql_reviewer.diff_parser import ChangedFile, ChangedLine
-from sql_reviewer.sql_extractor import extract_queries, ExtractedQuery
+from sql_reviewer.sql_extractor import extract_queries
 
 
-def make_changed_file(filename: str, lines: dict[int, str], full_content: str = "") -> ChangedFile:
+def make_changed_file(
+    filename: str, lines: dict[int, str], full_content: str = ""
+) -> ChangedFile:
     """Helper: build a ChangedFile where keys are line numbers, values are content."""
     changed_lines = [
         ChangedLine(line_number=ln, diff_position=ln, content=content)
         for ln, content in lines.items()
     ]
-    return ChangedFile(filename=filename, full_content=full_content, changed_lines=changed_lines)
+    return ChangedFile(
+        filename=filename, full_content=full_content, changed_lines=changed_lines
+    )
 
 
 def test_extracts_raw_select_string():
@@ -44,10 +47,7 @@ def test_skips_non_sql_strings():
 
 
 def test_only_extracts_changed_lines():
-    full_content = (
-        'old = "SELECT id FROM orders"\n'
-        'new = "SELECT name FROM users"\n'
-    )
+    full_content = 'old = "SELECT id FROM orders"\nnew = "SELECT name FROM users"\n'
     # Only line 2 is "changed"
     cf = make_changed_file(
         "src/app.py",
@@ -75,11 +75,19 @@ def test_orm_extraction_with_sqlalchemy(mocker):
         "stmt = select(User).where(User.active == True)\n"
         "result = session.execute(stmt)\n"
     )
-    cf = make_changed_file("src/repo.py", {2: "stmt = select(User).where(User.active == True)"}, full_content=content)
+    cf = make_changed_file(
+        "src/repo.py",
+        {2: "stmt = select(User).where(User.active == True)"},
+        full_content=content,
+    )
 
     mock_client = MagicMock()
     mock_client.messages.create.return_value = MagicMock(
-        content=[MagicMock(text='[{"sql": "SELECT * FROM users WHERE active = true", "line_number": 2}]')]
+        content=[
+            MagicMock(
+                text='[{"sql": "SELECT * FROM users WHERE active = true", "line_number": 2}]'
+            )
+        ]
     )
 
     queries = extract_queries([cf], anthropic_client=mock_client)
@@ -91,7 +99,9 @@ def test_orm_extraction_with_sqlalchemy(mocker):
 
 def test_orm_extraction_malformed_json_skipped(mocker):
     content = "from sqlalchemy import select\nstmt = select(User)\n"
-    cf = make_changed_file("src/repo.py", {2: "stmt = select(User)"}, full_content=content)
+    cf = make_changed_file(
+        "src/repo.py", {2: "stmt = select(User)"}, full_content=content
+    )
 
     mock_client = MagicMock()
     mock_client.messages.create.return_value = MagicMock(
@@ -104,7 +114,9 @@ def test_orm_extraction_malformed_json_skipped(mocker):
 
 
 def test_extracts_insert():
-    content = 'cursor.execute("INSERT INTO events (user_id, action) VALUES (1, \'click\')")\n'
+    content = (
+        "cursor.execute(\"INSERT INTO events (user_id, action) VALUES (1, 'click')\")\n"
+    )
     cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
     queries = extract_queries([cf], anthropic_client=None)
     raw = [q for q in queries if q.source == "raw"]
@@ -113,7 +125,7 @@ def test_extracts_insert():
 
 
 def test_extracts_insert_returning():
-    content = 'sql = "INSERT INTO users (email) VALUES (\'a@b.com\') RETURNING id"\n'
+    content = "sql = \"INSERT INTO users (email) VALUES ('a@b.com') RETURNING id\"\n"
     cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
     queries = extract_queries([cf], anthropic_client=None)
     raw = [q for q in queries if q.source == "raw"]
@@ -133,8 +145,8 @@ def test_extracts_update():
 def test_extracts_cte():
     content = (
         'q = """\n'
-        'WITH active AS (SELECT id FROM users WHERE active = true)\n'
-        'SELECT * FROM active\n'
+        "WITH active AS (SELECT id FROM users WHERE active = true)\n"
+        "SELECT * FROM active\n"
         '"""\n'
     )
     cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
@@ -147,10 +159,10 @@ def test_extracts_cte():
 def test_extracts_merge():
     content = (
         'sql = """\n'
-        'MERGE INTO inventory AS target\n'
-        'USING staging AS source ON target.sku = source.sku\n'
-        'WHEN MATCHED THEN UPDATE SET qty = source.qty\n'
-        'WHEN NOT MATCHED THEN INSERT (sku, qty) VALUES (source.sku, source.qty)\n'
+        "MERGE INTO inventory AS target\n"
+        "USING staging AS source ON target.sku = source.sku\n"
+        "WHEN MATCHED THEN UPDATE SET qty = source.qty\n"
+        "WHEN NOT MATCHED THEN INSERT (sku, qty) VALUES (source.sku, source.qty)\n"
         '"""\n'
     )
     cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
@@ -163,10 +175,10 @@ def test_extracts_merge():
 def test_extracts_multiline_string():
     content = (
         'sql = """\n'
-        '    SELECT u.id, u.email, o.total\n'
-        '    FROM users u\n'
-        '    JOIN orders o ON o.user_id = u.id\n'
-        '    WHERE u.active = true\n'
+        "    SELECT u.id, u.email, o.total\n"
+        "    FROM users u\n"
+        "    JOIN orders o ON o.user_id = u.id\n"
+        "    WHERE u.active = true\n"
         '"""\n'
     )
     cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
@@ -208,7 +220,9 @@ def test_extracts_text_wrapper():
 def test_orm_line_number_no_nearby_changed_line():
     content = "from sqlalchemy import select\n" + "\n" * 20 + "stmt = select(User)\n"
     # Changed line is at 22, Claude returns line_number=1 (far from any changed line)
-    cf = make_changed_file("src/repo.py", {22: "stmt = select(User)"}, full_content=content)
+    cf = make_changed_file(
+        "src/repo.py", {22: "stmt = select(User)"}, full_content=content
+    )
 
     mock_client = MagicMock()
     mock_client.messages.create.return_value = MagicMock(

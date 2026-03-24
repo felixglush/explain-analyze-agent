@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from typing import Literal
 
 import httpx
 
@@ -89,7 +88,9 @@ def _delete_review_comment(comment_id: int, repo: str, token: str) -> None:
         headers=_headers(token),
     )
     if resp.status_code not in (204, 404):
-        logger.warning("Failed to delete review comment %d: %s", comment_id, resp.status_code)
+        logger.warning(
+            "Failed to delete review comment %d: %s", comment_id, resp.status_code
+        )
 
 
 def _delete_issue_comment(comment_id: int, repo: str, token: str) -> None:
@@ -98,7 +99,9 @@ def _delete_issue_comment(comment_id: int, repo: str, token: str) -> None:
         headers=_headers(token),
     )
     if resp.status_code not in (204, 404):
-        logger.warning("Failed to delete issue comment %d: %s", comment_id, resp.status_code)
+        logger.warning(
+            "Failed to delete issue comment %d: %s", comment_id, resp.status_code
+        )
 
 
 def _patch_review_comment(comment_id: int, body: str, repo: str, token: str) -> None:
@@ -158,7 +161,11 @@ def post_findings(
     for f in postable:
         key = (f.filename, f.diff_position)
         if key in seen_keys:
-            logger.warning("Duplicate finding at %s:%s — keeping first", f.filename, f.diff_position)
+            logger.warning(
+                "Duplicate finding at %s:%s — keeping first",
+                f.filename,
+                f.diff_position,
+            )
         else:
             seen_keys.add(key)
             deduped.append(f)
@@ -189,7 +196,11 @@ def post_findings(
         return
 
     comments = [
-        {"path": f.filename, "position": f.diff_position, "body": _build_comment_body(f)}
+        {
+            "path": f.filename,
+            "position": f.diff_position,
+            "body": _build_comment_body(f),
+        }
         for f in to_post
     ]
     resp = httpx.post(
