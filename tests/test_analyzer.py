@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 from unittest.mock import MagicMock
-from sql_reviewer.sql_extractor import ExtractedQuery
-from sql_reviewer.explainer import ExplainResult
+
 from sql_reviewer.analyzer import analyze_results
+from sql_reviewer.explainer import ExplainResult
+from sql_reviewer.sql_extractor import ExtractedQuery
 
 
 def make_result(
@@ -22,9 +24,7 @@ def make_result(
     return ExplainResult(query=query, plan_text=plan)
 
 
-SAMPLE_PLAN = (
-    "Seq Scan on users  (cost=0.00..1.00 rows=1 width=36)\n  Filter: (active = true)"
-)
+SAMPLE_PLAN = "Seq Scan on users  (cost=0.00..1.00 rows=1 width=36)\n  Filter: (active = true)"
 
 
 def _tool_response(name: str, input: dict) -> MagicMock:

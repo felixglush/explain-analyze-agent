@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -115,7 +116,7 @@ def _analyze_one(result: ExplainResult, anthropic_client) -> Finding | None:
                     {"role": "assistant", "content": message.content},
                     {
                         "role": "user",
-                        "content": f"Validation failed: {error}. Please call a tool again with the correct format.",
+                        "content": f"Validation failed: {error}. Please call a tool again with the correct format.",  # noqa: E501
                     },
                 ]
                 continue

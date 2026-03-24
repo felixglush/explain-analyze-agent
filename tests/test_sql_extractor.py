@@ -1,19 +1,15 @@
 from unittest.mock import MagicMock
+
 from sql_reviewer.diff_parser import ChangedFile, ChangedLine
 from sql_reviewer.sql_extractor import extract_queries
 
 
-def make_changed_file(
-    filename: str, lines: dict[int, str], full_content: str = ""
-) -> ChangedFile:
+def make_changed_file(filename: str, lines: dict[int, str], full_content: str = "") -> ChangedFile:
     """Helper: build a ChangedFile where keys are line numbers, values are content."""
     changed_lines = [
-        ChangedLine(line_number=ln, diff_position=ln, content=content)
-        for ln, content in lines.items()
+        ChangedLine(line_number=ln, diff_position=ln, content=content) for ln, content in lines.items()
     ]
-    return ChangedFile(
-        filename=filename, full_content=full_content, changed_lines=changed_lines
-    )
+    return ChangedFile(filename=filename, full_content=full_content, changed_lines=changed_lines)
 
 
 def test_extracts_raw_select_string():
@@ -83,11 +79,7 @@ def test_orm_extraction_with_sqlalchemy(mocker):
 
     mock_client = MagicMock()
     mock_client.messages.create.return_value = MagicMock(
-        content=[
-            MagicMock(
-                text='[{"sql": "SELECT * FROM users WHERE active = true", "line_number": 2}]'
-            )
-        ]
+        content=[MagicMock(text='[{"sql": "SELECT * FROM users WHERE active = true", "line_number": 2}]')]
     )
 
     queries = extract_queries([cf], anthropic_client=mock_client)
@@ -99,14 +91,10 @@ def test_orm_extraction_with_sqlalchemy(mocker):
 
 def test_orm_extraction_malformed_json_skipped(mocker):
     content = "from sqlalchemy import select\nstmt = select(User)\n"
-    cf = make_changed_file(
-        "src/repo.py", {2: "stmt = select(User)"}, full_content=content
-    )
+    cf = make_changed_file("src/repo.py", {2: "stmt = select(User)"}, full_content=content)
 
     mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(
-        content=[MagicMock(text="not valid json")]
-    )
+    mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="not valid json")])
 
     queries = extract_queries([cf], anthropic_client=mock_client)
     orm = [q for q in queries if q.source == "orm"]
@@ -114,9 +102,7 @@ def test_orm_extraction_malformed_json_skipped(mocker):
 
 
 def test_extracts_insert():
-    content = (
-        "cursor.execute(\"INSERT INTO events (user_id, action) VALUES (1, 'click')\")\n"
-    )
+    content = "cursor.execute(\"INSERT INTO events (user_id, action) VALUES (1, 'click')\")\n"
     cf = make_changed_file("src/db.py", {1: content.strip()}, full_content=content)
     queries = extract_queries([cf], anthropic_client=None)
     raw = [q for q in queries if q.source == "raw"]
@@ -144,10 +130,7 @@ def test_extracts_update():
 
 def test_extracts_cte():
     content = (
-        'q = """\n'
-        "WITH active AS (SELECT id FROM users WHERE active = true)\n"
-        "SELECT * FROM active\n"
-        '"""\n'
+        'q = """\nWITH active AS (SELECT id FROM users WHERE active = true)\nSELECT * FROM active\n"""\n'
     )
     cf = make_changed_file("src/db.py", {1: content[:50]}, full_content=content)
     queries = extract_queries([cf], anthropic_client=None)
@@ -220,9 +203,7 @@ def test_extracts_text_wrapper():
 def test_orm_line_number_no_nearby_changed_line():
     content = "from sqlalchemy import select\n" + "\n" * 20 + "stmt = select(User)\n"
     # Changed line is at 22, Claude returns line_number=1 (far from any changed line)
-    cf = make_changed_file(
-        "src/repo.py", {22: "stmt = select(User)"}, full_content=content
-    )
+    cf = make_changed_file("src/repo.py", {22: "stmt = select(User)"}, full_content=content)
 
     mock_client = MagicMock()
     mock_client.messages.create.return_value = MagicMock(

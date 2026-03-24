@@ -31,6 +31,9 @@ include = ["sql_reviewer*"]
 testpaths = ["tests"]
 addopts = "--tb=short"
 
+[tool.ruff]
+line-length = 110
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import re
 from dataclasses import dataclass
@@ -53,9 +54,7 @@ class ExplainResult:
     plan_text: str
 
 
-def explain_queries(
-    queries: list[ExtractedQuery], database_url: str
-) -> list[ExplainResult]:
+def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[ExplainResult]:
     results: list[ExplainResult] = []
 
     try:
@@ -70,9 +69,7 @@ def explain_queries(
             sql = substitute_params(query.sql)
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,)
-                    )
+                    cur.execute("SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,))
                     try:
                         statements = sqlglot.parse(sql)
                         if statements and isinstance(

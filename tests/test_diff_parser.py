@@ -1,6 +1,8 @@
 import base64
-import respx
+
 import httpx
+import respx
+
 from sql_reviewer.diff_parser import (
     fetch_changed_files,
     parse_patch_positions,
@@ -44,17 +46,13 @@ def test_fetch_changed_files_returns_changed_lines(paginated):
     patch = "@@ -1,3 +1,4 @@\n line1\n line2\n+SELECT * FROM users\n line4"
 
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=paginated(
-            [{"filename": "src/app.py", "status": "modified", "patch": patch}]
-        )
+        side_effect=paginated([{"filename": "src/app.py", "status": "modified", "patch": patch}])
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/contents/src/app.py").mock(
-        return_value=httpx.Response(
-            200, json={"content": encoded + "\n", "encoding": "base64"}
-        )
+        return_value=httpx.Response(200, json={"content": encoded + "\n", "encoding": "base64"})
     )
 
     files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])
@@ -93,9 +91,7 @@ def test_fetch_changed_files_filters_by_pattern(paginated):
     file_content = "unchanged\nnew\n"
     encoded = base64.b64encode(file_content.encode()).decode()
     respx.get(f"{BASE_URL}/repos/{REPO}/contents/src/app.py").mock(
-        return_value=httpx.Response(
-            200, json={"content": encoded, "encoding": "base64"}
-        )
+        return_value=httpx.Response(200, json={"content": encoded, "encoding": "base64"})
     )
 
     files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])
@@ -106,9 +102,7 @@ def test_fetch_changed_files_filters_by_pattern(paginated):
 @respx.mock
 def test_fetch_changed_files_skips_file_without_patch(paginated):
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=paginated(
-            [{"filename": "src/big.py", "status": "modified"}]
-        )  # no patch key
+        side_effect=paginated([{"filename": "src/big.py", "status": "modified"}])  # no patch key
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "main"}})
@@ -123,9 +117,7 @@ def test_fetch_changed_files_skips_removed_file(paginated):
     patch = "@@ -1,3 +1,4 @@\n line1\n line2\n+SELECT * FROM users\n line4"
 
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=paginated(
-            [{"filename": "src/app.py", "status": "removed", "patch": patch}]
-        )
+        side_effect=paginated([{"filename": "src/app.py", "status": "removed", "patch": patch}])
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
@@ -145,17 +137,13 @@ def test_fetch_changed_files_url_encodes_path(paginated):
     patch = "@@ -1,1 +1,2 @@\n line1\n+SELECT * FROM users"
 
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        side_effect=paginated(
-            [{"filename": filename, "status": "modified", "patch": patch}]
-        )
+        side_effect=paginated([{"filename": filename, "status": "modified", "patch": patch}])
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/contents/{encoded_filename}").mock(
-        return_value=httpx.Response(
-            200, json={"content": encoded_content, "encoding": "base64"}
-        )
+        return_value=httpx.Response(200, json={"content": encoded_content, "encoding": "base64"})
     )
 
     files = fetch_changed_files(REPO, PR_NUMBER, TOKEN, ["src/**/*.py"])

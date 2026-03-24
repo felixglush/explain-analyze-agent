@@ -1,9 +1,11 @@
-import pytest
 from unittest.mock import patch
-from sql_reviewer.main import main
+
+import pytest
+
 from sql_reviewer.diff_parser import ChangedFile, ChangedLine
-from sql_reviewer.sql_extractor import ExtractedQuery
 from sql_reviewer.explainer import ExplainResult
+from sql_reviewer.main import main
+from sql_reviewer.sql_extractor import ExtractedQuery
 
 
 def test_main_exits_1_on_missing_config(tmp_path, monkeypatch):
@@ -54,9 +56,7 @@ def test_main_exits_0_on_happy_path(tmp_path, monkeypatch):
     changed_file = ChangedFile(
         filename="src/app.py",
         full_content="SELECT * FROM users\n",
-        changed_lines=[
-            ChangedLine(line_number=1, diff_position=1, content="SELECT * FROM users")
-        ],
+        changed_lines=[ChangedLine(line_number=1, diff_position=1, content="SELECT * FROM users")],
     )
     extracted_query = ExtractedQuery(
         sql="SELECT * FROM users",

@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import json as _json
+
+import httpx
 import pytest
 import respx
-import httpx
+
 from sql_reviewer.analyzer import Finding
-from sql_reviewer.commenter import post_findings, _build_comment_body, MARKER
+from sql_reviewer.commenter import MARKER, _build_comment_body, post_findings
 
 REPO = "owner/repo"
 PR_NUMBER = 7
@@ -12,9 +15,7 @@ TOKEN = "ghtoken"
 BASE = "https://api.github.com"
 
 
-def make_finding(
-    line: int = 5, diff_pos: int | None = 5, severity: str = "warning"
-) -> Finding:
+def make_finding(line: int = 5, diff_pos: int | None = 5, severity: str = "warning") -> Finding:
     return Finding(
         filename="src/app.py",
         line_number=line,
@@ -103,9 +104,7 @@ def test_post_findings_deletes_old_comments(paginated):
         {"id": 103, "body": "unrelated comment"},
     ]
     # Pagination: data on page 1, empty on page 2
-    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
-        side_effect=paginated(old_comments)
-    )
+    respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(side_effect=paginated(old_comments))
     respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -160,15 +159,11 @@ def test_post_skips_finding_with_none_diff_position():
         posted_bodies.append(_json.loads(request.content))
         return httpx.Response(200, json={"id": 1})
 
-    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
-        side_effect=capture_review
-    )
+    respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(side_effect=capture_review)
 
     post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=2)
     assert len(posted_bodies) == 1
-    assert (
-        len(posted_bodies[0]["comments"]) == 1
-    )  # only the finding with diff_position=3
+    assert len(posted_bodies[0]["comments"]) == 1  # only the finding with diff_position=3
 
 
 @respx.mock
@@ -200,9 +195,7 @@ def test_post_findings_skips_identical_comment(paginated):
     post_findings([finding], REPO, PR_NUMBER, TOKEN, total_queries=1)
 
     assert not delete_route.called, "DELETE should not be called for identical comment"
-    assert not post_route.called, (
-        "POST /reviews should not be called for identical comment"
-    )
+    assert not post_route.called, "POST /reviews should not be called for identical comment"
 
 
 @respx.mock
@@ -234,9 +227,7 @@ def test_post_findings_patches_changed_comment(paginated):
     post_findings([finding], REPO, PR_NUMBER, TOKEN, total_queries=1)
 
     assert patch_route.called, "PATCH should be called to update the changed comment"
-    assert not post_route.called, (
-        "POST /reviews should not be called when PATCHing existing comment"
-    )
+    assert not post_route.called, "POST /reviews should not be called when PATCHing existing comment"
 
     import json as _json2
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 
 import httpx
@@ -34,15 +35,12 @@ def _build_comment_body(finding: Finding) -> str:
     if finding.has_suggestion and finding.suggestion:
         lines.append(f"\n```sql\n{finding.suggestion}\n```")
     lines.append(
-        f"\n<details>\n<summary>EXPLAIN ANALYZE output</summary>\n\n"
-        f"```\n{finding.plan_text}\n```\n</details>"
+        f"\n<details>\n<summary>EXPLAIN ANALYZE output</summary>\n\n```\n{finding.plan_text}\n```\n</details>"
     )
     return "\n".join(lines)
 
 
-def _fetch_existing_bot_review_comments(
-    repo: str, pr_number: int, token: str
-) -> dict[tuple[str, int], dict]:
+def _fetch_existing_bot_review_comments(repo: str, pr_number: int, token: str) -> dict[tuple[str, int], dict]:
     """Return bot review comments keyed by (path, position)."""
     url = f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}/comments"
     headers = _headers(token)
@@ -63,9 +61,7 @@ def _fetch_existing_bot_review_comments(
     return result
 
 
-def _fetch_existing_bot_issue_comments(
-    repo: str, pr_number: int, token: str
-) -> list[dict]:
+def _fetch_existing_bot_issue_comments(repo: str, pr_number: int, token: str) -> list[dict]:
     """Return bot issue-level comments (e.g. 'no issues found')."""
     url = f"{GITHUB_API}/repos/{repo}/issues/{pr_number}/comments"
     headers = _headers(token)
@@ -88,9 +84,7 @@ def _delete_review_comment(comment_id: int, repo: str, token: str) -> None:
         headers=_headers(token),
     )
     if resp.status_code not in (204, 404):
-        logger.warning(
-            "Failed to delete review comment %d: %s", comment_id, resp.status_code
-        )
+        logger.warning("Failed to delete review comment %d: %s", comment_id, resp.status_code)
 
 
 def _delete_issue_comment(comment_id: int, repo: str, token: str) -> None:
@@ -99,9 +93,7 @@ def _delete_issue_comment(comment_id: int, repo: str, token: str) -> None:
         headers=_headers(token),
     )
     if resp.status_code not in (204, 404):
-        logger.warning(
-            "Failed to delete issue comment %d: %s", comment_id, resp.status_code
-        )
+        logger.warning("Failed to delete issue comment %d: %s", comment_id, resp.status_code)
 
 
 def _patch_review_comment(comment_id: int, body: str, repo: str, token: str) -> None:
@@ -137,7 +129,8 @@ def post_findings(
                 lines.append(f"- {emoji} **{f.severity}** `{f.filename}`: {f.summary}")
             body = "\n".join(lines)
         else:
-            body = f"{MARKER} SQL Review: no issues found in {total_queries} quer{'y' if total_queries == 1 else 'ies'} analyzed"
+            suffix = "y" if total_queries == 1 else "ies"
+            body = f"{MARKER} SQL Review: no issues found in {total_queries} quer{suffix} analyzed"
         # Always clean up stale review comments
         for c in existing_review.values():
             _delete_review_comment(c["id"], repo, token)
