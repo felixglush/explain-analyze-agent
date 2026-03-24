@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 import psycopg2
+import sqlglot
 
 from sql_reviewer.sql_extractor import ExtractedQuery
 
@@ -11,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 STATEMENT_TIMEOUT_MS = 5000
 
-# Heuristics: (set of substrings to match, dummy_value)
+# Named-param heuristics: match substrings of the param name to a type-appropriate dummy.
+# Realistic types produce more informative EXPLAIN plans (e.g. integer 1 triggers index scans).
 _PARAM_HEURISTICS = [
     ({"id", "count", "num"}, "1"),
     ({"date", "time", "created", "updated"}, "'2024-01-01'"),
     ({"is_", "has_", "active", "enabled"}, "true"),
 ]
-_DEFAULT_DUMMY = "'placeholder'"
 
 
 def _dummy_value(param_name: str) -> str:
@@ -25,49 +26,23 @@ def _dummy_value(param_name: str) -> str:
     for keywords, value in _PARAM_HEURISTICS:
         if any(kw in name for kw in keywords):
             return value
-    return _DEFAULT_DUMMY
-
-
-def _context_dummy_value(sql: str, match_start: int) -> str:
-    """
-    Look at the SQL text preceding a positional placeholder to find the column
-    name, then apply the same heuristics used for named params.
-
-    Scans backward from match_start for a pattern like `column_name =` or
-    `column_name >` etc.  Falls back to _DEFAULT_DUMMY if no identifier found.
-    """
-    preceding = sql[:match_start]
-    # Find the last identifier immediately before the placeholder, allowing for
-    # an optional comparison operator and whitespace between identifier and operator.
-    # Pattern: <identifier> <optional_whitespace> <operator> <whitespace>
-    m = re.search(r'([a-zA-Z_]\w*)\s*(?:[=<>!]+|LIKE|ILIKE|IN|NOT)\s*$', preceding, re.IGNORECASE)
-    if m:
-        return _dummy_value(m.group(1))
-    return _DEFAULT_DUMMY
+    return "'placeholder'"
 
 
 def substitute_params(sql: str) -> str:
     """Replace parameter placeholders with type-appropriate dummy values."""
-    # PostgreSQL positional: $1, $2, ... — look at preceding context for heuristic
-    def replace_positional(m: re.Match) -> str:
-        return _context_dummy_value(sql, m.start())
+    # PostgreSQL positional: $1, $2, ... — use integer; type mismatches are caught
+    # by the try/except in explain_queries and logged as a warning.
+    sql = re.sub(r"\$\d+", "1", sql)
 
-    sql = re.sub(r"\$\d+", replace_positional, sql)
-
-    # SQLAlchemy named: :param_name
-    def replace_named(m: re.Match) -> str:
-        return _dummy_value(m.group(1))
-
-    sql = re.sub(r":([a-zA-Z_]\w*)", replace_named, sql)
+    # SQLAlchemy named: :param_name  (negative lookbehind skips ::cast syntax)
+    sql = re.sub(r"(?<!:):([a-zA-Z_]\w*)", lambda m: _dummy_value(m.group(1)), sql)
 
     # psycopg2 named: %(name)s
-    def replace_psycopg2_named(m: re.Match) -> str:
-        return _dummy_value(m.group(1))
-
-    sql = re.sub(r"%\(([^)]+)\)s", replace_psycopg2_named, sql)
+    sql = re.sub(r"%\(([^)]+)\)s", lambda m: _dummy_value(m.group(1)), sql)
 
     # psycopg2 positional: %s
-    sql = sql.replace("%s", _DEFAULT_DUMMY)
+    sql = re.sub(r"(?<!['\w])%s(?!['\w])", "1", sql)
 
     return sql
 
@@ -93,7 +68,17 @@ def explain_queries(queries: list[ExtractedQuery], database_url: str) -> list[Ex
             sql = substitute_params(query.sql)
             try:
                 with conn.cursor() as cur:
-                    cur.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
+                    cur.execute("SET LOCAL statement_timeout = %s", (STATEMENT_TIMEOUT_MS,))
+                    try:
+                        statements = sqlglot.parse(sql)
+                        if not statements or not isinstance(statements[0], sqlglot.expressions.Select):
+                            logger.warning(
+                                "Skipping non-SELECT statement for EXPLAIN ANALYZE in %s line %d",
+                                query.filename, query.line_number,
+                            )
+                            continue
+                    except sqlglot.errors.ParseError:
+                        pass  # let it through; EXPLAIN will catch syntax errors
                     # psycopg2 has no way to parameterize EXPLAIN ANALYZE;
                     # `sql` is already a substituted literal string, not user input.
                     cur.execute(f"EXPLAIN ANALYZE {sql}")  # noqa: S608

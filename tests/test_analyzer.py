@@ -1,14 +1,14 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
+from unittest.mock import MagicMock, call
 from sql_reviewer.sql_extractor import ExtractedQuery
 from sql_reviewer.explainer import ExplainResult
-from sql_reviewer.analyzer import analyze_results, Finding, _build_batches
+from sql_reviewer.analyzer import analyze_results, Finding
 
 
-def make_result(sql: str, plan: str, line: int = 1, filename: str = "src/app.py") -> ExplainResult:
+def make_result(sql: str, plan: str, line: int = 1, diff_pos: int | None = None, filename: str = "src/app.py") -> ExplainResult:
     query = ExtractedQuery(
         sql=sql, filename=filename, line_number=line,
-        diff_position=line, source="raw",
+        diff_position=diff_pos if diff_pos is not None else line, source="raw",
     )
     return ExplainResult(query=query, plan_text=plan)
 
@@ -16,107 +16,110 @@ def make_result(sql: str, plan: str, line: int = 1, filename: str = "src/app.py"
 SAMPLE_PLAN = "Seq Scan on users  (cost=0.00..1.00 rows=1 width=36)\n  Filter: (active = true)"
 
 
-def test_analyze_returns_findings(mocker):
-    results = [make_result("SELECT * FROM users WHERE active = true", SAMPLE_PLAN, line=5)]
+def _tool_response(name: str, input: dict) -> MagicMock:
+    """Simulate a Claude messages.create() response that calls a tool."""
+    block = MagicMock()
+    block.type = "tool_use"
+    block.name = name
+    block.input = input
+    return MagicMock(content=[block])
+
+
+def _finding_response(severity="warning", summary="Sequential scan", suggestion=None, has_suggestion=False) -> MagicMock:
+    return _tool_response("report_finding", {
+        "severity": severity, "summary": summary,
+        "suggestion": suggestion, "has_suggestion": has_suggestion,
+    })
+
+
+def _no_issues_response() -> MagicMock:
+    return _tool_response("no_issues", {})
+
+
+def test_analyze_returns_finding():
+    result = make_result("SELECT * FROM users WHERE active = true", SAMPLE_PLAN, line=5)
     mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="""
-[
-  {
-    "line_number": 5,
-    "severity": "warning",
-    "summary": "Sequential scan on users — consider an index on active",
-    "suggestion": "CREATE INDEX idx_users_active ON users (active) WHERE active = true;",
-    "has_suggestion": true
-  }
-]
-""")])
-
-    findings = analyze_results(results, mock_client)
-    assert len(findings) == 1
-    assert findings[0].severity == "warning"
-    assert findings[0].diff_position == 5
-    assert findings[0].has_suggestion is True
-    assert findings[0].plan_text == SAMPLE_PLAN
-
-
-def test_analyze_resolves_diff_position_from_query():
-    query = ExtractedQuery(
-        sql="SELECT 1", filename="src/app.py", line_number=10,
-        diff_position=42,  # diff position differs from line number
-        source="raw",
+    mock_client.messages.create.return_value = _finding_response(
+        severity="warning",
+        summary="Sequential scan on users — consider an index on active",
+        suggestion="CREATE INDEX idx_users_active ON users (active) WHERE active = true;",
+        has_suggestion=True,
     )
-    result = ExplainResult(query=query, plan_text=SAMPLE_PLAN)
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="""
-[{"line_number": 10, "severity": "info", "summary": "ok", "suggestion": null, "has_suggestion": false}]
-""")])
-
     findings = analyze_results([result], mock_client)
-    assert findings[0].diff_position == 42  # resolved from ExtractedQuery
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.severity == "warning"
+    assert f.line_number == 5
+    assert f.diff_position == 5
+    assert f.has_suggestion is True
+    assert f.plan_text == SAMPLE_PLAN
 
 
-def test_analyze_none_diff_position_when_line_not_in_batch():
-    result = make_result("SELECT 1", SAMPLE_PLAN, line=5)
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="""
-[{"line_number": 999, "severity": "info", "summary": "ok", "suggestion": null, "has_suggestion": false}]
-""")])
-
-    findings = analyze_results([result], mock_client)
-    assert findings[0].diff_position is None  # line 999 not in batch
-
-
-def test_analyze_skips_batch_on_malformed_json():
+def test_analyze_no_issues_produces_no_finding():
     result = make_result("SELECT 1", SAMPLE_PLAN)
     mock_client = MagicMock()
-    mock_client.messages.create.return_value = MagicMock(
-        content=[MagicMock(text="this is not json")]
-    )
+    mock_client.messages.create.return_value = _no_issues_response()
+    assert analyze_results([result], mock_client) == []
+
+
+def test_analyze_diff_position_comes_from_query():
+    """diff_position is taken from the ExplainResult, not from Claude's response."""
+    result = make_result("SELECT 1", SAMPLE_PLAN, line=10, diff_pos=42)
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _finding_response(summary="ok")
     findings = analyze_results([result], mock_client)
-    assert findings == []
+    assert findings[0].diff_position == 42
 
 
-def test_analyze_skips_batch_on_api_error():
+def test_analyze_skips_on_api_error():
     result = make_result("SELECT 1", SAMPLE_PLAN)
     mock_client = MagicMock()
     mock_client.messages.create.side_effect = Exception("API error")
-    findings = analyze_results([result], mock_client)
-    assert findings == []
+    assert analyze_results([result], mock_client) == []
 
 
-def test_batching_splits_by_token_limit():
-    # Create 3 results, two with large plans that together exceed the token budget
-    big_plan = "x" * 32001  # ~8000 tokens at 4 chars/token
-    results = [
-        make_result("SELECT 1", big_plan, line=1),
-        make_result("SELECT 2", big_plan, line=2),
-        make_result("SELECT 3", "short plan", line=3),
+def test_analyze_retries_on_invalid_severity_then_succeeds():
+    """On validation failure, _analyze_one retries once with a correction message."""
+    result = make_result("SELECT 1", SAMPLE_PLAN)
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = [
+        _tool_response("report_finding", {"severity": "bad", "summary": "x", "suggestion": None, "has_suggestion": False}),
+        _finding_response(severity="info", summary="fixed"),
     ]
-    batches = _build_batches(results)
-    assert len(batches) == 3  # each large plan is its own batch; short one is third
+    findings = analyze_results([result], mock_client)
+    assert len(findings) == 1
+    assert findings[0].severity == "info"
+    assert mock_client.messages.create.call_count == 2
 
 
-def test_batching_splits_by_query_count():
-    results = [make_result(f"SELECT {i}", "short", line=i) for i in range(12)]
-    batches = _build_batches(results)
-    assert len(batches) == 2  # 10 + 2
-    assert len(batches[0]) == 10
-    assert len(batches[1]) == 2
+def test_analyze_returns_none_after_max_retries():
+    """After MAX_RETRIES failed validations, _analyze_one gives up and returns None."""
+    result = make_result("SELECT 1", SAMPLE_PLAN)
+    mock_client = MagicMock()
+    # Both attempts return bad severity
+    mock_client.messages.create.return_value = _tool_response(
+        "report_finding", {"severity": "INVALID", "summary": "x", "suggestion": None, "has_suggestion": False}
+    )
+    assert analyze_results([result], mock_client) == []
+
+
+def test_analyze_one_api_call_per_query():
+    """Each query triggers exactly one Claude API call (plus retries if any)."""
+    results = [make_result(f"SELECT {i}", SAMPLE_PLAN, line=i+1) for i in range(5)]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _no_issues_response()
+    analyze_results(results, mock_client)
+    assert mock_client.messages.create.call_count == 5
 
 
 def test_analyze_multiple_files_correct_filenames():
-    """Findings must carry the correct filename even when multiple files are analyzed."""
     result_a = make_result("SELECT 1", SAMPLE_PLAN, line=1, filename="src/a.py")
     result_b = make_result("SELECT 2", SAMPLE_PLAN, line=2, filename="src/b.py")
-
     mock_client = MagicMock()
-    # Return a finding for each call; Claude is called once per file
     mock_client.messages.create.side_effect = [
-        MagicMock(content=[MagicMock(text='[{"line_number": 1, "severity": "info", "summary": "ok a", "suggestion": null, "has_suggestion": false}]')]),
-        MagicMock(content=[MagicMock(text='[{"line_number": 2, "severity": "info", "summary": "ok b", "suggestion": null, "has_suggestion": false}]')]),
+        _finding_response(summary="issue in a"),
+        _finding_response(summary="issue in b"),
     ]
-
     findings = analyze_results([result_a, result_b], mock_client)
     assert len(findings) == 2
-    filenames = {f.filename for f in findings}
-    assert filenames == {"src/a.py", "src/b.py"}
+    assert {f.filename for f in findings} == {"src/a.py", "src/b.py"}

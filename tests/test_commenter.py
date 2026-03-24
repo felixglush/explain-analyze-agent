@@ -1,5 +1,5 @@
 from __future__ import annotations
-import pytest
+import json as _json
 import respx
 import httpx
 from sql_reviewer.analyzer import Finding
@@ -22,6 +22,15 @@ def make_finding(line: int = 5, diff_pos: int | None = 5, severity: str = "warni
         has_suggestion=True,
         plan_text="Seq Scan on users  (cost=0.00..1.00 rows=1 width=36)",
     )
+
+
+def _paginated(first_page: list):
+    """Side-effect factory: returns first_page on page 1, [] on subsequent pages."""
+    responses = iter([
+        httpx.Response(200, json=first_page),
+        httpx.Response(200, json=[]),
+    ])
+    return lambda req: next(responses)
 
 
 def test_build_comment_body_warning():
@@ -61,11 +70,12 @@ def test_build_comment_body_no_suggestion():
 def test_post_findings_with_inline_comments():
     findings = [make_finding(diff_pos=4)]
 
-    # No existing sql-reviewer comments
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
-    # Post review
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
         return_value=httpx.Response(200, json={"id": 1})
     )
@@ -77,13 +87,17 @@ def test_post_findings_with_inline_comments():
 def test_post_findings_deletes_old_comments():
     findings = [make_finding(diff_pos=4)]
 
-    # Two existing sql-reviewer comments
+    old_comments = [
+        {"id": 101, "path": "src/app.py", "position": 99, "body": f"{MARKER}\nold comment at pos 99"},
+        {"id": 102, "path": "src/other.py", "position": 5, "body": f"{MARKER}\nstale finding"},
+        {"id": 103, "body": "unrelated comment"},
+    ]
+    # Pagination: data on page 1, empty on page 2
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
-        return_value=httpx.Response(200, json=[
-            {"id": 101, "body": f"{MARKER}\nold comment"},
-            {"id": 102, "body": f"{MARKER}\nanother old comment"},
-            {"id": 103, "body": "unrelated comment"},
-        ])
+        side_effect=_paginated(old_comments)
+    )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
     )
     respx.delete(f"{BASE}/repos/{REPO}/pulls/comments/101").mock(
         return_value=httpx.Response(204)
@@ -103,6 +117,9 @@ def test_post_no_findings_uses_issue_comment():
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     respx.post(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(201, json={"id": 99})
     )
@@ -113,23 +130,24 @@ def test_post_no_findings_uses_issue_comment():
 @respx.mock
 def test_post_skips_finding_with_none_diff_position():
     findings = [
-        make_finding(diff_pos=None),   # should be skipped
-        make_finding(diff_pos=3),      # should be included
+        make_finding(diff_pos=None),   # skipped — no diff position
+        make_finding(diff_pos=3),      # included
     ]
 
     respx.get(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
+    respx.get(f"{BASE}/repos/{REPO}/issues/{PR_NUMBER}/comments").mock(
+        return_value=httpx.Response(200, json=[])
+    )
 
     posted_bodies = []
     def capture_review(request, route):
-        import json as _json
-        body = _json.loads(request.content)
-        posted_bodies.append(body)
+        posted_bodies.append(_json.loads(request.content))
         return httpx.Response(200, json={"id": 1})
 
     respx.post(f"{BASE}/repos/{REPO}/pulls/{PR_NUMBER}/reviews").mock(side_effect=capture_review)
 
     post_findings(findings, REPO, PR_NUMBER, TOKEN, total_queries=2)
     assert len(posted_bodies) == 1
-    assert len(posted_bodies[0]["comments"]) == 1  # only the one with diff_position=3
+    assert len(posted_bodies[0]["comments"]) == 1  # only the finding with diff_position=3

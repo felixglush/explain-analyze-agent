@@ -1,5 +1,4 @@
 import base64
-import pytest
 import respx
 import httpx
 from sql_reviewer.diff_parser import (
@@ -13,6 +12,15 @@ REPO = "owner/repo"
 PR_NUMBER = 42
 TOKEN = "ghtoken"
 BASE_URL = "https://api.github.com"
+
+
+def _paginated(first_page: list):
+    """Side-effect: returns first_page on page 1, [] on page 2 (breaks pagination loop)."""
+    responses = iter([
+        httpx.Response(200, json=first_page),
+        httpx.Response(200, json=[]),
+    ])
+    return lambda req: next(responses)
 
 
 def test_parse_patch_positions_single_hunk():
@@ -45,9 +53,7 @@ def test_fetch_changed_files_returns_changed_lines():
     patch = "@@ -1,3 +1,4 @@\n line1\n line2\n+SELECT * FROM users\n line4"
 
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        return_value=httpx.Response(200, json=[
-            {"filename": "src/app.py", "status": "modified", "patch": patch}
-        ])
+        side_effect=_paginated([{"filename": "src/app.py", "status": "modified", "patch": patch}])
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "feature-branch"}})
@@ -71,7 +77,7 @@ def test_fetch_changed_files_returns_changed_lines():
 @respx.mock
 def test_fetch_changed_files_filters_by_pattern():
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        return_value=httpx.Response(200, json=[
+        side_effect=_paginated([
             {"filename": "README.md", "status": "modified", "patch": "@@ -1 +1 @@\n+text"},
             {"filename": "src/app.py", "status": "modified", "patch": "@@ -1 +1,2 @@\n unchanged\n+new"},
         ])
@@ -93,9 +99,7 @@ def test_fetch_changed_files_filters_by_pattern():
 @respx.mock
 def test_fetch_changed_files_skips_file_without_patch():
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files").mock(
-        return_value=httpx.Response(200, json=[
-            {"filename": "src/big.py", "status": "modified"}  # no patch key
-        ])
+        side_effect=_paginated([{"filename": "src/big.py", "status": "modified"}])  # no patch key
     )
     respx.get(f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}").mock(
         return_value=httpx.Response(200, json={"head": {"ref": "main"}})

@@ -1,7 +1,5 @@
 from __future__ import annotations
-import json
 import logging
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
@@ -9,9 +7,33 @@ from sql_reviewer.explainer import ExplainResult
 
 logger = logging.getLogger(__name__)
 
-MAX_QUERIES_PER_BATCH = 10
-MAX_PLAN_TOKENS_PER_BATCH = 8000
-CHARS_PER_TOKEN = 4
+MAX_RETRIES = 2
+_VALID_SEVERITIES = {"info", "warning", "critical"}
+
+# Tool_use gives us schema-validated structured output without JSON parsing.
+# Claude must call one of these two tools — "report_finding" if an issue exists,
+# "no_issues" otherwise.
+_TOOLS = [
+    {
+        "name": "report_finding",
+        "description": "Report a structural SQL performance issue found in the query.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "severity": {"type": "string", "enum": ["info", "warning", "critical"]},
+                "summary": {"type": "string", "description": "One-line description of the issue"},
+                "suggestion": {"type": ["string", "null"], "description": "SQL or config fix, or null"},
+                "has_suggestion": {"type": "boolean"},
+            },
+            "required": ["severity", "summary", "suggestion", "has_suggestion"],
+        },
+    },
+    {
+        "name": "no_issues",
+        "description": "Indicate that the query has no structural performance issues.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+]
 
 
 @dataclass
@@ -26,112 +48,88 @@ class Finding:
     plan_text: str
 
 
-def _build_batches(results: list[ExplainResult]) -> list[list[ExplainResult]]:
-    """Split results into batches respecting MAX_QUERIES and token budget."""
-    batches: list[list[ExplainResult]] = []
-    current_batch: list[ExplainResult] = []
-    current_tokens = 0
-
-    for result in results:
-        plan_tokens = len(result.plan_text) // CHARS_PER_TOKEN
-        if current_batch and (
-            len(current_batch) >= MAX_QUERIES_PER_BATCH
-            or current_tokens + plan_tokens > MAX_PLAN_TOKENS_PER_BATCH
-        ):
-            batches.append(current_batch)
-            current_batch = []
-            current_tokens = 0
-        current_batch.append(result)
-        current_tokens += plan_tokens
-
-    if current_batch:
-        batches.append(current_batch)
-
-    return batches
-
-
-def _build_prompt(batch: list[ExplainResult]) -> str:
+def _build_prompt(result: ExplainResult) -> str:
+    query = result.query
     parts = [
-        "Review these SQL queries and their EXPLAIN ANALYZE output. "
+        "Review this SQL query and its EXPLAIN ANALYZE output. "
         "Focus on structural issues: missing indexes, sequential scans on large tables, "
         "inefficient join strategies, unanchored LIKE patterns, unnecessary sorts. "
-        "Do NOT comment on cost values — the database has no rows so cost estimates are meaningless. "
-        "Return ONLY a JSON array. Each object must have: "
-        "line_number (int), severity ('info'|'warning'|'critical'), "
-        "summary (string), suggestion (string or null), has_suggestion (bool). "
-        "If a query looks fine, omit it from the array. Return [] if no issues found.\n"
+        "Do NOT comment on cost values — the database has no rows so cost estimates are meaningless.\n",
     ]
-
-    for i, result in enumerate(batch, 1):
-        query = result.query
-        parts.append(f"\n--- Query {i} (file: {query.filename}, line: {query.line_number}) ---")
-        if query.source_context:
-            parts.append(f"Source context:\n{query.source_context}")
-        parts.append(f"SQL:\n{query.sql}")
-        parts.append(f"\nEXPLAIN ANALYZE:\n{result.plan_text}")
-
+    if query.source_context:
+        parts.append(f"Source context:\n{query.source_context}")
+    parts.append(f"SQL:\n{query.sql}")
+    parts.append(f"\nEXPLAIN ANALYZE:\n{result.plan_text}")
     return "\n".join(parts)
 
 
-def _analyze_batch(
-    batch: list[ExplainResult],
-    anthropic_client,
-    filename: str,
-) -> list[Finding]:
-    # Build a lookup: line_number → ExplainResult (for diff_position resolution)
-    line_to_result = {r.query.line_number: r for r in batch}
+def _validate(data: dict) -> str | None:
+    """Return an error description if the tool input is invalid, else None."""
+    if data.get("severity") not in _VALID_SEVERITIES:
+        return f"severity must be one of {sorted(_VALID_SEVERITIES)}, got {data.get('severity')!r}"
+    if not isinstance(data.get("summary"), str) or not data["summary"]:
+        return "summary must be a non-empty string"
+    return None
 
-    prompt = _build_prompt(batch)
-    try:
-        message = anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
+
+def _analyze_one(result: ExplainResult, anthropic_client) -> Finding | None:
+    messages: list[dict] = [{"role": "user", "content": _build_prompt(result)}]
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            message = anthropic_client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                tools=_TOOLS,
+                tool_choice={"type": "any"},
+                messages=messages,
+            )
+        except Exception as e:
+            logger.warning("API call failed for %s:%s: %s", result.query.filename, result.query.line_number, e)
+            return None
+
+        tool_block = next((b for b in message.content if b.type == "tool_use"), None)
+        if tool_block is None or tool_block.name == "no_issues":
+            return None
+
+        data = tool_block.input
+        error = _validate(data)
+        if error:
+            if attempt < MAX_RETRIES - 1:
+                logger.debug("Validation failed (attempt %d): %s", attempt + 1, error)
+                messages = [
+                    *messages,
+                    {"role": "assistant", "content": message.content},
+                    {"role": "user", "content": f"Validation failed: {error}. Please call a tool again with the correct format."},
+                ]
+                continue
+            logger.warning(
+                "Analyzer validation failed for %s:%s after %d attempts: %s",
+                result.query.filename, result.query.line_number, MAX_RETRIES, error,
+            )
+            return None
+
+        return Finding(
+            filename=result.query.filename,
+            line_number=result.query.line_number,
+            diff_position=result.query.diff_position,
+            severity=data["severity"],
+            summary=data["summary"],
+            suggestion=data.get("suggestion"),
+            has_suggestion=bool(data.get("has_suggestion")),
+            plan_text=result.plan_text,
         )
-        raw = message.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:])
-        if raw.endswith("```"):
-            raw = "\n".join(raw.split("\n")[:-1])
-        items = json.loads(raw)
-    except Exception as e:
-        logger.warning("Analyzer batch failed: %s", e)
-        return []
 
-    findings = []
-    for item in items:
-        line_number = item.get("line_number")
-        source_result = line_to_result.get(line_number)
-        diff_position = source_result.query.diff_position if source_result else None
-        plan_text = source_result.plan_text if source_result else ""
-
-        findings.append(Finding(
-            filename=filename,
-            line_number=line_number,
-            diff_position=diff_position,
-            severity=item.get("severity", "info"),
-            summary=item.get("summary", ""),
-            suggestion=item.get("suggestion"),
-            has_suggestion=item.get("has_suggestion", False),
-            plan_text=plan_text,
-        ))
-
-    return findings
+    return None
 
 
 def analyze_results(
     results: list[ExplainResult],
     anthropic_client,
 ) -> list[Finding]:
-    # Group by filename first, then split each file's results into batches.
-    # This ensures _analyze_batch always receives results from a single file,
-    # so Finding.filename is always correct.
-    by_file: dict[str, list[ExplainResult]] = defaultdict(list)
-    for result in results:
-        by_file[result.query.filename].append(result)
-
     findings = []
-    for file_name, file_results in by_file.items():
-        for batch in _build_batches(file_results):
-            findings.extend(_analyze_batch(batch, anthropic_client, filename=file_name))
+    for result in results:
+        finding = _analyze_one(result, anthropic_client)
+        if finding is not None:
+            findings.append(finding)
     return findings
