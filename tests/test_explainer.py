@@ -217,8 +217,9 @@ def test_explain_multiple_valid_queries(db_conn, create_test_table):
 
 def test_explain_statement_timeout(db_conn, create_test_table):
     """A query that exceeds the statement timeout is skipped; subsequent queries still run."""
-    import sql_reviewer.explainer as explainer_mod
     from unittest.mock import patch
+
+    import sql_reviewer.explainer as explainer_mod
 
     with patch.object(explainer_mod, "STATEMENT_TIMEOUT_MS", 1):
         queries = [
