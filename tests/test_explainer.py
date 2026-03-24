@@ -172,3 +172,60 @@ def test_explain_write_query_does_not_persist(db_conn, create_test_table):
         cur.execute("SELECT COUNT(*) FROM test_users WHERE name = 'test'")
         count = cur.fetchone()[0]
     assert count == 0
+
+
+def test_explain_ddl_skipped(db_conn, create_test_table):
+    """DDL statements are skipped; subsequent DML queries still produce results."""
+    queries = [
+        make_query("ALTER TABLE test_users ADD COLUMN IF NOT EXISTS extra TEXT", line=1),
+        make_query("SELECT * FROM test_users WHERE id = 1", line=2),
+    ]
+    results = explain_queries(queries, DB_URL)
+    assert len(results) == 1
+    assert results[0].query.line_number == 2
+
+
+def test_explain_named_params(db_conn, create_test_table):
+    """SQLAlchemy-style :name params are substituted and produce a valid plan."""
+    query = make_query("SELECT * FROM test_users WHERE id = :user_id")
+    results = explain_queries([query], DB_URL)
+    assert len(results) == 1
+    assert results[0].plan_text
+
+
+def test_explain_psycopg2_params(db_conn, create_test_table):
+    """psycopg2-style %(name)s and bare %s params are substituted and produce valid plans."""
+    queries = [
+        make_query("SELECT * FROM test_users WHERE id = %(user_id)s", line=1),
+        make_query("SELECT * FROM test_users WHERE id = %s", line=2),
+    ]
+    results = explain_queries(queries, DB_URL)
+    assert len(results) == 2
+
+
+def test_explain_multiple_valid_queries(db_conn, create_test_table):
+    """Multiple valid queries each produce an ExplainResult."""
+    queries = [
+        make_query("SELECT * FROM test_users WHERE id = 1", line=1),
+        make_query("SELECT COUNT(*) FROM test_users", line=2),
+        make_query("SELECT name FROM test_users WHERE active = true", line=3),
+    ]
+    results = explain_queries(queries, DB_URL)
+    assert len(results) == 3
+    assert {r.query.line_number for r in results} == {1, 2, 3}
+
+
+def test_explain_statement_timeout(db_conn, create_test_table):
+    """A query that exceeds the statement timeout is skipped; subsequent queries still run."""
+    import sql_reviewer.explainer as explainer_mod
+    from unittest.mock import patch
+
+    with patch.object(explainer_mod, "STATEMENT_TIMEOUT_MS", 1):
+        queries = [
+            make_query("SELECT pg_sleep(1)", line=1),
+            make_query("SELECT * FROM test_users WHERE id = 1", line=2),
+        ]
+        results = explain_queries(queries, DB_URL)
+
+    assert len(results) == 1
+    assert results[0].query.line_number == 2
