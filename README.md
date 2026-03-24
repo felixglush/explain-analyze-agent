@@ -1,5 +1,7 @@
 # SQL Review Action
 
+[![CI](https://github.com/felixglush/explain-analyze-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/felixglush/explain-analyze-agent/actions/workflows/ci.yml)
+
 Automatically runs `EXPLAIN ANALYZE` on SQL queries in pull request diffs and posts inline review comments with improvement suggestions.
 
 ## What it does
