@@ -56,10 +56,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install sql_reviewer
-        run: uv pip install --system .sql-reviewer-tool/
+        run: uv pip install .sql-reviewer-tool/
 
       - name: Run SQL review
-        run: python -m sql_reviewer
+        run: uv run python -m sql_reviewer
         env:
           DATABASE_URL: postgresql://postgres:test@localhost:5432/sql_review
           ANTHROPIC_API_KEY: ${{ secrets.anthropic_api_key }}
