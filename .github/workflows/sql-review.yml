@@ -51,12 +51,10 @@ jobs:
           ref: ${{ inputs.tool_ref }}
           path: .sql-reviewer-tool
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
 
       - name: Install sql_reviewer
-        run: pip install .sql-reviewer-tool/
+        run: uv pip install --system .sql-reviewer-tool/
 
       - name: Run SQL review
         run: python -m sql_reviewer
