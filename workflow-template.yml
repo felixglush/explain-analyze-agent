@@ -1,6 +1,5 @@
 # Copy this file to .github/workflows/sql-review.yml in your repo.
-# That's the only setup required — all complexity lives in the tool repo.
-#
+
 # Required secret: ANTHROPIC_API_KEY
 #   Add it at: Settings → Secrets and variables → Actions → New repository secret
 #   GITHUB_TOKEN is provided automatically by GitHub Actions.
